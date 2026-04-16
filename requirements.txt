@@ -1,0 +1,11 @@
+torch
+numpy
+tqdm
+scikit-learn
+colorama
+transformers
+faiss-gpu
+emoji
+sentence-transformers
+pandas
+PyWavelets>=1.4.0
