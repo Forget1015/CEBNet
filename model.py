@@ -265,7 +265,7 @@ class SemanticMemoryConsolidation(nn.Module):
         eye = torch.eye(self.n_prototypes, device=sim.device).bool()
         sim = sim.masked_fill(eye, -1e9)
         max_sim, _ = sim.max(dim=-1)
-        return F.relu(max_sim).mean()
+        return max_sim.mean()
 
 
 # ============================================================
@@ -419,13 +419,12 @@ class CEBNet(nn.Module):
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            if hasattr(module, 'weight') and module.weight.requires_grad:
-                module.weight.data.normal_(mean=0.0, std=self.initializer_range)
+            module.weight.data.normal_(mean=0.0, std=self.initializer_range)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
 
     def _encode_items(self, item_seq, code_seq):
         """VQ Encoder: Q-Former. Returns item_emb [B,L,d] and code_emb [B*L,C,d].
@@ -442,8 +441,7 @@ class CEBNet(nn.Module):
         encoder_output = torch.stack(text_embs, dim=1)  # [B*L, text_num, d]
 
         item_seq_emb = self.qformer(query_emb, encoder_output)[-1]  # [B*L, C, d]
-        # Sequence side: qformer output only (no query residual) — matches CCFRec forward()
-        item_emb = item_seq_emb.mean(dim=1)  # [B*L, d]
+        item_emb = item_seq_emb.mean(dim=1) + query_emb.mean(dim=1)  # [B*L, d]
         item_emb = item_emb.view(B, L, -1)
 
         return item_emb, item_seq_emb
@@ -467,38 +465,43 @@ class CEBNet(nn.Module):
         # Step 1: VQ encode
         item_emb, code_emb = self._encode_items(item_seq, code_seq)
 
-        # Step 2: Add position encoding (like CCFRec, but no full-sequence Transformer here)
-        pos_ids = torch.arange(L, device=item_seq.device).unsqueeze(0).expand(B, -1)
-        pos_emb = self.position_embedding(pos_ids)
-        item_emb = item_emb + pos_emb
-        item_emb = self.layer_norm(item_emb)
-        item_emb = self.dropout(item_emb)
+        # Step 2: Split (no outer PE — WEBD and SMC handle their own)
+        # For-loop split: right-aligned working memory
+        x_wm = torch.zeros(B, m, d, device=self.device)
+        wm_valid = torch.zeros(B, m, dtype=torch.bool, device=self.device)
 
-        # Step 3: Vectorized split into working memory and long-term history
-        positions = torch.arange(L, device=item_seq.device).unsqueeze(0).expand(B, -1)
-        seq_ends = item_seq_len.unsqueeze(1)
-        wm_starts = (item_seq_len - m).clamp(min=0).unsqueeze(1)
+        for i in range(B):
+            seq_len = item_seq_len[i].item()
+            wm_start = max(0, seq_len - m)
+            actual_wm_len = min(m, seq_len)
+            x_wm[i, m - actual_wm_len:] = item_emb[i, wm_start:seq_len]
+            wm_valid[i, m - actual_wm_len:] = True
 
-        # Extract working memory [B, m, d]
-        wm_indices = wm_starts + torch.arange(m, device=item_seq.device).unsqueeze(0)  # [B, m]
-        wm_indices = wm_indices.clamp(max=L - 1)
-        wm_valid = (wm_indices < seq_ends) & (wm_indices >= wm_starts)
-        x_wm = torch.gather(item_emb, 1, wm_indices.unsqueeze(-1).expand(-1, -1, d))
+        x_wm_raw = x_wm.clone()
 
-        # Extract long-term history [B, long_len, d]
         long_len = L - m
         if long_len > 0:
+            actual_long_lens = (item_seq_len - m).clamp(min=0)
             x_long = item_emb[:, :long_len, :]
-            long_valid = (positions[:, :long_len] < wm_starts) & (positions[:, :long_len] < seq_ends)
+            long_valid = torch.zeros(B, long_len, dtype=torch.bool, device=self.device)
+            for i in range(B):
+                al = actual_long_lens[i].item()
+                if al > 0:
+                    long_valid[i, :al] = True
+                else:
+                    last_valid_idx = item_seq_len[i].item() - 1
+                    if last_valid_idx >= 0:
+                        x_long[i, 0] = item_emb[i, last_valid_idx]
+                        long_valid[i, 0] = True
         else:
-            x_long = x_wm
-            long_valid = wm_valid
+            x_long = x_wm_raw.clone()
+            long_valid = wm_valid.clone()
 
         # Step 4: WEBD — working memory denoising
         anchor, x_before_dwt, x_denoised = self.webd(x_wm, mask=wm_valid)
 
         # Step 5: SMC — long-term memory consolidation
-        memory = self.smc(x_long, mask=long_valid if long_len > 0 else None)
+        memory = self.smc(x_long, mask=long_valid)
 
         # Step 6: DEBR — decoupled retrieval and fusion
         z_u = self.debr(anchor, memory)
