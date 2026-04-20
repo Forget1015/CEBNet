@@ -73,6 +73,10 @@ def parse_arguments():
     parser.add_argument('--proto_temperature', type=float, default=1.0)
     parser.add_argument('--n_layers_webd', type=int, default=2)
     parser.add_argument('--n_layers_smc', type=int, default=2)
+    parser.add_argument('--wavelet_levels', type=int, default=2,
+                        help='Number of wavelet decomposition levels')
+    parser.add_argument('--decouple_weight', type=float, default=0.01,
+                        help='Weight for decoupling regularization loss')
 
     # Output
     parser.add_argument("--device", type=str, default="cuda:0")

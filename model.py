@@ -48,10 +48,11 @@ class ContrastiveLoss(nn.Module):
 # ============================================================
 class WaveletBurstDenoiser(nn.Module):
     def __init__(self, hidden_size, inner_size=256, n_heads=2, n_layers=1,
-                 wavelet='haar', dropout=0.1, layer_norm_eps=1e-12):
+                 wavelet='haar', dropout=0.1, layer_norm_eps=1e-12, wavelet_levels=2):
         super().__init__()
         self.hidden_size = hidden_size
         self.wavelet_name = wavelet
+        self.wavelet_levels = wavelet_levels
 
         # Rehearsal Encoder: causal Transformer
         self.rehearsal_encoder = Transformer(
@@ -72,14 +73,16 @@ class WaveletBurstDenoiser(nn.Module):
         self.register_buffer('rec_lo', torch.tensor(w.rec_lo, dtype=torch.float32).flip(0))
         self.register_buffer('rec_hi', torch.tensor(w.rec_hi, dtype=torch.float32).flip(0))
 
-        # Context-aware dynamic threshold
-        self.threshold_net = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Sigmoid()
-        )
-        self.threshold_scale = nn.Parameter(torch.ones(1) * 0.5)
+        # Multi-scale: independent threshold nets for each level
+        self.threshold_nets = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_size, hidden_size), nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size), nn.Sigmoid()
+            ) for _ in range(wavelet_levels)
+        ])
+        self.threshold_scales = nn.ParameterList([
+            nn.Parameter(torch.ones(1) * 0.5) for _ in range(wavelet_levels)
+        ])
         self.dropout = nn.Dropout(dropout)
 
         # Attention pooling
@@ -132,13 +135,7 @@ class WaveletBurstDenoiser(nn.Module):
         return rec.permute(0, 2, 1)
 
     def forward(self, x_wm, mask=None):
-        """
-        Args:
-            x_wm: [B, m, d] working memory embeddings (already context-encoded)
-            mask: [B, m] True=valid
-        Returns:
-            anchor: [B, d], x_before_dwt: [B, m, d], x_denoised: [B, m, d]
-        """
+        """Multi-scale wavelet denoising with rehearsal encoding."""
         B, m, d = x_wm.shape
 
         # Rehearsal Encoding (causal)
@@ -156,24 +153,35 @@ class WaveletBurstDenoiser(nn.Module):
         x_rehearsed = self.rehearsal_encoder(inp, inp, attn_mask)[-1]
         x_before_dwt = x_rehearsed.clone()
 
-        # DWT
-        cA, cD = self._dwt_1d(x_rehearsed)
-
-        # Context-aware threshold
+        # Context for thresholding
         if mask is not None:
             mf = mask.float().unsqueeze(-1)
             context = (x_rehearsed * mf).sum(1) / mf.sum(1).clamp(min=1)
         else:
             context = x_rehearsed.mean(1)
-        threshold = self.threshold_net(context) * self.threshold_scale.abs()
-        threshold = threshold.unsqueeze(1)
 
-        # Soft thresholding
-        cD_clean = torch.sign(cD) * F.relu(torch.abs(cD) - threshold)
+        # Multi-scale DWT decomposition
+        approx = x_rehearsed
+        details = []
+        target_lens = []
+        for j in range(self.wavelet_levels):
+            cur_len = approx.size(1)
+            if cur_len < 2:  # too short to decompose further
+                break
+            target_lens.append(cur_len)
+            cA, cD = self._dwt_1d(approx)
+            # Level-specific soft thresholding
+            threshold = self.threshold_nets[j](context) * self.threshold_scales[j].abs()
+            cD_clean = torch.sign(cD) * F.relu(torch.abs(cD) - threshold.unsqueeze(1))
+            details.append(cD_clean)
+            approx = cA
 
-        # IDWT
-        x_denoised = self._idwt_1d(cA, cD_clean, m)
-        x_denoised = self.dropout(x_denoised)
+        # Multi-scale IDWT reconstruction (reverse order)
+        reconstructed = approx
+        for j in range(len(details) - 1, -1, -1):
+            reconstructed = self._idwt_1d(reconstructed, details[j], target_lens[j])
+
+        x_denoised = self.dropout(reconstructed)
 
         # Attention pooling → anchor
         q = self.attn_pool_q(x_denoised)
@@ -217,6 +225,9 @@ class SemanticMemoryConsolidation(nn.Module):
         self.proj_item = nn.Linear(hidden_size, hidden_size)
         self.proj_proto = nn.Linear(hidden_size, hidden_size)
 
+        # Temporal decay parameter (learnable)
+        self.temporal_decay = nn.Parameter(torch.tensor(-0.1))
+
     def forward(self, x_long, mask=None):
         """
         Args:
@@ -238,12 +249,21 @@ class SemanticMemoryConsolidation(nn.Module):
         else:
             attn_mask = torch.zeros(B, 1, 1, n, device=x_long.device)
 
-        x_replayed = self.replay_encoder(inp, inp, attn_mask)[-1]
+        trfm_out = self.replay_encoder(inp, inp, attn_mask)
+        x_replayed = trfm_out[-1] if len(trfm_out) > 0 else inp
 
-        # Prototype assignment
+        # Prototype assignment with temporal decay
         item_proj = self.proj_item(x_replayed)
         proto_proj = self.proj_proto(self.prototypes)
         sim = torch.matmul(item_proj, proto_proj.T) / math.sqrt(d)
+
+        # Temporal decay: positions closer to end get higher weight
+        # delta_i = n - 1 - i (distance from sequence end)
+        positions = torch.arange(n, device=x_long.device).float().unsqueeze(0).expand(B, -1)
+        delta = (n - 1) - positions  # [B, n], 0 for last item, n-1 for first
+        decay_bias = self.temporal_decay * torch.log(delta + 1)  # [B, n]
+        sim = sim + decay_bias.unsqueeze(-1)  # broadcast to [B, n, K]
+
         assign = F.softmax(sim / self.temperature, dim=-1)  # [B, n, K]
 
         # Zero out padding positions explicitly
@@ -265,7 +285,7 @@ class SemanticMemoryConsolidation(nn.Module):
         eye = torch.eye(self.n_prototypes, device=sim.device).bool()
         sim = sim.masked_fill(eye, -1e9)
         max_sim, _ = sim.max(dim=-1)
-        return F.relu(max_sim).mean()
+        return max_sim.mean()
 
 
 # ============================================================
@@ -306,6 +326,11 @@ class DecoupledEpisodicBuffer(nn.Module):
         g = self.fusion_gate(torch.cat([anchor, z_long], dim=-1))
         z_u = g * anchor + (1 - g) * z_long
         return self.layer_norm(z_u)
+
+    def compute_decouple_loss(self):
+        """Frobenius norm of W_attn^T @ W_repr to enforce orthogonal subspaces."""
+        cross = torch.matmul(self.W_attn_memory.weight.T, self.W_repr_memory.weight)
+        return torch.norm(cross, p='fro') ** 2
 
 
 # ============================================================
@@ -356,6 +381,8 @@ class CEBNet(nn.Module):
         self.proto_temperature = getattr(args, 'proto_temperature', 1.0)
         self.n_layers_webd = getattr(args, 'n_layers_webd', 1)
         self.n_layers_smc = getattr(args, 'n_layers_smc', 1)
+        self.wavelet_levels = getattr(args, 'wavelet_levels', 2)
+        self.decouple_weight = getattr(args, 'decouple_weight', 0.01)
 
         # === VQ index ===
         index[0] = [0] * self.code_level
@@ -397,7 +424,7 @@ class CEBNet(nn.Module):
             self.embedding_size, inner_size=self.hidden_size,
             n_heads=self.n_heads, n_layers=self.n_layers_webd,
             wavelet=self.wavelet, dropout=self.hidden_dropout_prob,
-            layer_norm_eps=self.layer_norm_eps,
+            layer_norm_eps=self.layer_norm_eps, wavelet_levels=self.wavelet_levels,
         )
         self.smc = SemanticMemoryConsolidation(
             self.embedding_size, inner_size=self.hidden_size,
@@ -419,13 +446,12 @@ class CEBNet(nn.Module):
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            if hasattr(module, 'weight') and module.weight.requires_grad:
-                module.weight.data.normal_(mean=0.0, std=self.initializer_range)
+            module.weight.data.normal_(mean=0.0, std=self.initializer_range)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
 
     def _encode_items(self, item_seq, code_seq):
         """VQ Encoder: Q-Former. Returns item_emb [B,L,d] and code_emb [B*L,C,d].
@@ -442,8 +468,7 @@ class CEBNet(nn.Module):
         encoder_output = torch.stack(text_embs, dim=1)  # [B*L, text_num, d]
 
         item_seq_emb = self.qformer(query_emb, encoder_output)[-1]  # [B*L, C, d]
-        # Sequence side: qformer output only (no query residual) — matches CCFRec forward()
-        item_emb = item_seq_emb.mean(dim=1)  # [B*L, d]
+        item_emb = item_seq_emb.mean(dim=1) + query_emb.mean(dim=1)  # [B*L, d]
         item_emb = item_emb.view(B, L, -1)
 
         return item_emb, item_seq_emb
@@ -467,40 +492,44 @@ class CEBNet(nn.Module):
         # Step 1: VQ encode
         item_emb, code_emb = self._encode_items(item_seq, code_seq)
 
-        # Step 2: Add position encoding (like CCFRec, but no full-sequence Transformer here)
-        pos_ids = torch.arange(L, device=item_seq.device).unsqueeze(0).expand(B, -1)
-        pos_emb = self.position_embedding(pos_ids)
-        item_emb = item_emb + pos_emb
-        item_emb = self.layer_norm(item_emb)
-        item_emb = self.dropout(item_emb)
+        # Step 2: Split into working memory + long-term history (for-loop, right-aligned)
+        x_wm = torch.zeros(B, m, d, device=self.device)
+        wm_valid = torch.zeros(B, m, dtype=torch.bool, device=self.device)
 
-        # Step 3: Vectorized split into working memory and long-term history
-        positions = torch.arange(L, device=item_seq.device).unsqueeze(0).expand(B, -1)
-        seq_ends = item_seq_len.unsqueeze(1)
-        wm_starts = (item_seq_len - m).clamp(min=0).unsqueeze(1)
+        for i in range(B):
+            seq_len = item_seq_len[i].item()
+            wm_start = max(0, seq_len - m)
+            actual_wm_len = min(m, seq_len)
+            x_wm[i, m - actual_wm_len:] = item_emb[i, wm_start:seq_len]
+            wm_valid[i, m - actual_wm_len:] = True
 
-        # Extract working memory [B, m, d]
-        wm_indices = wm_starts + torch.arange(m, device=item_seq.device).unsqueeze(0)  # [B, m]
-        wm_indices = wm_indices.clamp(max=L - 1)
-        wm_valid = (wm_indices < seq_ends) & (wm_indices >= wm_starts)
-        x_wm = torch.gather(item_emb, 1, wm_indices.unsqueeze(-1).expand(-1, -1, d))
+        x_wm_raw = x_wm.clone()
 
-        # Extract long-term history [B, long_len, d]
         long_len = L - m
         if long_len > 0:
+            actual_long_lens = (item_seq_len - m).clamp(min=0)
             x_long = item_emb[:, :long_len, :]
-            long_valid = (positions[:, :long_len] < wm_starts) & (positions[:, :long_len] < seq_ends)
+            long_valid = torch.zeros(B, long_len, dtype=torch.bool, device=self.device)
+            for i in range(B):
+                al = actual_long_lens[i].item()
+                if al > 0:
+                    long_valid[i, :al] = True
+                else:
+                    last_valid_idx = item_seq_len[i].item() - 1
+                    if last_valid_idx >= 0:
+                        x_long[i, 0] = item_emb[i, last_valid_idx]
+                        long_valid[i, 0] = True
         else:
-            x_long = x_wm
-            long_valid = wm_valid
+            x_long = x_wm_raw.clone()
+            long_valid = wm_valid.clone()
 
-        # Step 4: WEBD — working memory denoising
+        # Step 3: WEBD — working memory denoising
         anchor, x_before_dwt, x_denoised = self.webd(x_wm, mask=wm_valid)
 
-        # Step 5: SMC — long-term memory consolidation
-        memory = self.smc(x_long, mask=long_valid if long_len > 0 else None)
+        # Step 4: SMC — long-term memory consolidation
+        memory = self.smc(x_long, mask=long_valid)
 
-        # Step 6: DEBR — decoupled retrieval and fusion
+        # Step 5: DEBR — decoupled retrieval and fusion
         z_u = self.debr(anchor, memory)
 
         return z_u, code_emb, x_before_dwt, x_denoised
@@ -608,15 +637,20 @@ class CEBNet(nn.Module):
         # 5. Frequency consistency loss
         freq_loss = self.freq_loss_fn(x_before_dwt, x_denoised)
 
+        # 6. Decouple loss
+        decouple_loss = self.debr.compute_decouple_loss()
+
         # Total
         loss = (rec_loss
                 + self.cl_weight * cl_loss
                 + self.mlm_weight * mlm_loss
                 + self.ortho_weight * ortho_loss
-                + self.freq_weight * freq_loss)
+                + self.freq_weight * freq_loss
+                + self.decouple_weight * decouple_loss)
 
         return dict(loss=loss, rec_loss=rec_loss, cl_loss=cl_loss,
-                    mlm_loss=mlm_loss, ortho_loss=ortho_loss, freq_loss=freq_loss)
+                    mlm_loss=mlm_loss, ortho_loss=ortho_loss, freq_loss=freq_loss,
+                    decouple_loss=decouple_loss)
 
     def full_sort_predict(self, item_seq, item_seq_len, code_seq):
         z_u, _, _, _ = self.forward(item_seq, item_seq_len, code_seq)

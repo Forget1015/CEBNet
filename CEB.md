@@ -183,6 +183,63 @@ $$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{ortho}} 
 
 ---
 
+## 方法论升级：三大新增创新模块
+
+### 3.6 多尺度小波去噪（Multi-scale Wavelet Denoising, MSWD）
+
+**动机：** 单级 DWT 分解只能在一个频率尺度上区分噪声和信号。然而，用户行为噪声存在于多个时间尺度：秒级的误触（最高频）、分钟级的随机浏览（中频）、小时级的探索性行为（低频）。单级去噪无法同时处理这些不同尺度的噪声。
+
+**方法：** 我们将 WEBD 中的单级 DWT 扩展为 $J$ 级级联小波分解（Multi-Resolution Analysis, MRA）：
+
+$$\mathbf{A}_0 = \mathbf{X}'_{wm}$$
+$$\mathbf{A}_j, \mathbf{D}_j = \text{DWT}(\mathbf{A}_{j-1}), \quad j = 1, 2, ..., J$$
+
+在每一级 $j$，我们为高频细节系数 $\mathbf{D}_j$ 设置独立的上下文感知阈值：
+
+$$\tau_j = \text{ThresholdNet}_j(\text{context}) \cdot \alpha_j$$
+
+$$\mathbf{D}_j^{\text{clean}} = \text{sign}(\mathbf{D}_j) \cdot \max(|\mathbf{D}_j| - \tau_j, 0)$$
+
+最后通过多级逆小波变换（IDWT）逐层重构：
+
+$$\hat{\mathbf{A}}_{j-1} = \text{IDWT}(\mathbf{A}_j, \mathbf{D}_j^{\text{clean}}), \quad j = J, J-1, ..., 1$$
+
+**理论解释：** 多尺度分解对应认知心理学中"注意力过滤器"的层级结构——大脑在处理感知信息时，会在不同的时间粒度上分别过滤无关刺激。第 1 级去噪过滤最细粒度的随机波动（误触），第 2 级过滤中等粒度的探索性浏览，第 3 级过滤粗粒度的兴趣漂移噪声。
+
+### 3.7 时间衰减感知的原型分配（Temporal-Decay Prototype Assignment）
+
+**动机：** 当前 SMC 的原型分配纯粹基于语义相似度，不考虑交互发生的时间。然而，认知心理学中的 Ebbinghaus 遗忘曲线表明，记忆痕迹的强度随时间指数衰减——近期经历的记忆更鲜明，远期的逐渐模糊。
+
+**方法：** 在原型分配概率中引入时间衰减因子。对于长期历史中第 $i$ 个交互（距当前时刻的相对位置为 $\delta_i$），其对原型 $k$ 的分配概率修正为：
+
+$$\mathbf{A}_{ik} = \frac{\exp((\mathbf{x}'_i \mathbf{p}_k^\top / \sqrt{d}) + \gamma \cdot \log(\delta_i + 1))}{\sum_{j=1}^K \exp((\mathbf{x}'_i \mathbf{p}_j^\top / \sqrt{d}) + \gamma \cdot \log(\delta_i + 1))}$$
+
+其中 $\gamma$ 是可学习的时间衰减系数，$\delta_i = n - i$ 是第 $i$ 个交互距序列末尾的距离。$\log(\delta_i + 1)$ 提供对数衰减，使近期交互获得更高的分配权重。
+
+注意：时间衰减因子对所有原型 $k$ 是相同的，因此它不改变原型间的相对分配比例，而是调整每个交互的整体贡献权重——近期交互对所有原型的贡献更大，远期交互的贡献被衰减。
+
+**理论解释：** 这对应记忆巩固过程中的"近因效应（Recency Effect）"——海马体在回放记忆时，对近期事件的重播频率更高、痕迹更强。时间衰减因子使得原型更多地反映用户近期的兴趣演化，而非被远古的历史交互稀释。
+
+### 3.8 对比增强的解耦学习（Contrastive Decoupling Regularization）
+
+**动机：** DEBR 的检索子空间（$\mathcal{A}$ Space）和表示子空间（$\mathcal{R}$ Space）仅通过不同的线性投影来实现解耦，缺乏显式的正则化约束。如果两个子空间在训练过程中逐渐对齐（即 $\mathbf{W}_{\text{attn}}$ 和 $\mathbf{W}_{\text{repr}}$ 学到相似的投影方向），模型会退化为单一表示空间，Gap 3 中的"表示坍塌"和"循环依赖"问题将重新出现。
+
+**方法：** 引入解耦正则化损失 $\mathcal{L}_{\text{decouple}}$，强制检索投影矩阵和表示投影矩阵的列空间正交：
+
+$$\mathcal{L}_{\text{decouple}} = \| \mathbf{W}_{\text{attn}}^\top \mathbf{W}_{\text{repr}} \|_F^2$$
+
+其中 $\| \cdot \|_F$ 是 Frobenius 范数。当两个投影矩阵的列空间完全正交时，$\mathbf{W}_{\text{attn}}^\top \mathbf{W}_{\text{repr}} = \mathbf{0}$，损失为零。
+
+**理论解释：** 这直接对应认知心理学中"情景缓冲器"的核心功能——Baddeley 的工作记忆模型指出，情景缓冲器之所以能有效整合来自不同子系统的信息，正是因为它维护了独立的"索引通道"和"内容通道"。索引通道负责定位相关记忆（对应检索子空间），内容通道负责提取记忆的实质内容（对应表示子空间）。两个通道的独立性是情景缓冲器正常工作的前提。
+
+### 3.9 更新后的联合损失函数
+
+$$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{cl}} + \lambda_2 \mathcal{L}_{\text{mlm}} + \lambda_3 \mathcal{L}_{\text{ortho}} + \lambda_4 \mathcal{L}_{\text{freq}} + \lambda_5 \mathcal{L}_{\text{decouple}}$$
+
+其中 $\lambda_5$ 控制解耦正则化的强度，建议初始值为 0.01。
+
+---
+
 ## 核心升维点总结（向审稿人展示的防御逻辑）
 
 1. **Target-Free 设计的可用性**：与原版本依赖目标商品进行 Gating 导致无法在工业界 ANN（Approximate Nearest Neighbor）系统中落地不同，CEB-Net 最终输出统一的 $\mathbf{z}_u$ 向量，完美支持内积相似度快速检索，这体现了深厚的系统工程素养。

@@ -11,7 +11,7 @@ python main.py \
   --code_level=20 \
   --n_codes_per_lel=256 \
   --max_his_len=20 \
-  --batch_size=100 \
+  --batch_size=400 \
   --dropout_prob=0.3 \
   --dropout_prob_cross=0.3 \
   --n_layers=2 \
@@ -19,7 +19,7 @@ python main.py \
   --embedding_size=128 \
   --hidden_size=512 \
   --early_stop=100 \
-  --log_dir="./logs" \
+  --log_dir="./logs/重构后改400看看效果" \
   --device=cuda:7 \
   --wm_length=5 \
   --n_prototypes=32 \
@@ -71,8 +71,8 @@ python main.py \
     --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
     --code_level=20 \
     --n_codes_per_lel=256 \
-    --max_his_len=50 \
-    --batch_size=450 \
+    --max_his_len=20 \
+    --batch_size=400 \
     --dropout_prob=0.3 \
     --dropout_prob_cross=0.3 \
     --n_layers=2 \
@@ -80,8 +80,8 @@ python main.py \
     --embedding_size=128 \
     --hidden_size=512 \
     --early_stop=100 \
-    --log_dir="./logs/长度为50" \
-    --device=cuda:6 \
+    --log_dir="./logs/重构后改400看看效果" \
+    --device=cuda:7 \
     --wm_length=5 \
     --n_prototypes=32 \
     --wavelet=haar \
@@ -89,4 +89,6 @@ python main.py \
     --freq_weight=0.01 \
     --proto_temperature=1.0\
     --n_layers_webd=2\
-    --n_layers_smc=2
+    --n_layers_smc=2\
+    --wavelet_levels=2\
+    --decouple_weight=0.01

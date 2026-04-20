@@ -1,6 +1,6 @@
 # python preprocess.py --dataset Musical_Instruments --his_len 50
 
-# python encode_emb.py --dataset Musical_Instruments --text_types title brand features categories description --gpu_id 4
+# python encode_emb.py --dataset Musical_Instruments --text_types title brand features categories description --gpu_id 6
 
 # cd vq
 # python generate_faiss_multi_emb.py --config Musical_Instruments.yaml

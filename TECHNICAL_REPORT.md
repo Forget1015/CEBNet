@@ -364,9 +364,55 @@ CEBNet/
 
 ---
 
-## 四、实施计划
+## 五、新增创新模块设计
 
-1. **Phase 1**: 项目骨架 — 复制/链接 CCFRec 基础设施
-2. **Phase 2**: model.py — VQ Encoder + WEBD + SMC + DEBR + 损失
-3. **Phase 3**: trainer.py + main.py — 训练循环、评估、参数
-4. **Phase 4**: run.sh — 各数据集训练配置
+### 5.1 多尺度小波去噪（MSWD）
+
+**实现要点：**
+- 将 `_dwt_1d` 和 `_idwt_1d` 改为支持 J 级级联分解
+- 每一级有独立的 `threshold_net_j` 和 `threshold_scale_j`
+- 默认 J=2（2 级分解），可通过 `--wavelet_levels` 参数控制
+- 重构时从最深层逐层 IDWT 回来
+
+**数据流：**
+```
+x_rehearsed [B, m, d]
+  → DWT level 1 → cA1 [B, m/2, d], cD1 [B, m/2, d] → soft_threshold(cD1, τ1) → cD1_clean
+  → DWT level 2 → cA2 [B, m/4, d], cD2 [B, m/4, d] → soft_threshold(cD2, τ2) → cD2_clean
+  → IDWT level 2 → cA1_clean [B, m/2, d]
+  → IDWT level 1 → x_denoised [B, m, d]
+```
+
+### 5.2 时间衰减原型分配
+
+**实现要点：**
+- 在 SMC.forward() 中计算每个位置的时间衰减权重
+- `decay_weight = gamma * log(delta + 1)`，其中 delta 是距序列末尾的距离
+- gamma 是可学习参数，初始化为 -0.1（负值使近期交互权重更高）
+- 衰减权重加到 softmax 之前的 logits 上
+
+### 5.3 解耦正则化损失
+
+**实现要点：**
+- 在 DEBR 中新增 `compute_decouple_loss()` 方法
+- 计算 `W_attn_memory.weight.T @ W_repr_memory.weight` 的 Frobenius 范数
+- 在 `calculate_loss` 中加入 `decouple_weight * decouple_loss`
+- 默认 `decouple_weight=0.01`
+
+### 5.4 超参数配置
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| wavelet_levels | 2 | 小波分解级数 J |
+| decouple_weight | 0.01 | 解耦正则化权重 |
+| temporal_decay_init | -0.1 | 时间衰减系数初始值 |
+
+---
+
+## 六、实施计划
+
+1. **Phase 1**: 修复 4 个已确认的 bug（ortho_loss ReLU、query 残差、_init_weights、双重 PE）
+2. **Phase 2**: 实现多尺度小波去噪（MSWD）
+3. **Phase 3**: 实现时间衰减原型分配
+4. **Phase 4**: 实现解耦正则化损失
+5. **Phase 5**: 调参和消融实验
