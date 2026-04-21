@@ -76,21 +76,29 @@ $$\mathbf{A}, \mathbf{D} = \text{DWT}(\mathbf{X}'_{wm})$$
 
 其中 $\mathbf{A}$ 是保留平稳趋势的近似系数（低频），$\mathbf{D}$ 是捕获局部波动的细节系数（高频）。
 
-区别于传统频域方法简单抑制高频，我们设计了**上下文感知的动态软阈值（Context-aware Soft Thresholding）**：
+区别于传统频域方法简单抑制高频，我们设计了**上下文感知的动态软阈值（Context-aware Soft Thresholding）**。阈值由一个轻量神经网络根据序列的全局上下文动态生成：
 
-$$\tau = \alpha \cdot \text{Std}(\mathbf{D}) + \beta \cdot \text{Mean}(|\mathbf{D}|)$$
+$$\tau = \text{ThresholdNet}(\text{MaskedMean}(\mathbf{X}'_{wm})) \cdot \alpha$$
+
+其中 $\text{ThresholdNet}$ 是一个两层 MLP（Linear→ReLU→Linear→Sigmoid），$\alpha$ 是可学习的缩放因子。在多尺度分解中，每一级 $j$ 有独立的 $\text{ThresholdNet}_j$ 和 $\alpha_j$。
 
 随后，仅对高频细节系数 $\mathbf{D}$ 进行软阈值截断：
 
 $$\mathbf{D}_{\text{clean}} = \text{sign}(\mathbf{D}) \cdot \max(|\mathbf{D}| - \tau, 0)$$
 
-**理论解释：** 这一数学映射极其精妙，它将低于阈值 $\tau$ 的细微随机波动（误点击）强行归零，但完全保留了远高于阈值的巨大尖峰（代表用户的密集、突发性强意图）。
+**理论解释：** 与传统信号处理中使用固定统计量（如 $\text{Std}(\mathbf{D})$）作为阈值不同，我们采用可学习的神经网络动态生成阈值。这是因为推荐场景中的"噪声"定义是语义层面的（误点击 vs 真实意图），而非数值层面的。神经网络能够从序列的全局上下文中学习到"什么程度的高频波动是噪声"这一语义判断，而统计量只能捕获数值分布特征。Sigmoid 激活确保阈值为正，可学习的缩放因子 $\alpha$ 控制去噪的整体强度。
 
 去噪后，我们通过逆小波变换（IDWT）重构干净的工作记忆序列：
 
 $$\mathbf{X}''_{wm} = \text{IDWT}(\mathbf{A}, \mathbf{D}_{\text{clean}})$$
 
-最后，应用一层自注意力池化，将其提炼为极其纯净的**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$。
+最后，应用一层**自注意力池化（Self-Attention Pooling）**，将去噪后的工作记忆序列提炼为**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$：
+
+$$\alpha_i = \frac{\exp(\mathbf{q}_i^\top \mathbf{k}_i / \sqrt{d})}{\sum_{j=1}^m \exp(\mathbf{q}_j^\top \mathbf{k}_j / \sqrt{d})}, \quad \mathbf{z}_{\text{anchor}} = \sum_{i=1}^m \alpha_i \cdot \mathbf{x}''_i$$
+
+其中 $\mathbf{q}_i = \mathbf{W}_q \mathbf{x}''_i$，$\mathbf{k}_i = \mathbf{W}_k \mathbf{x}''_i$ 是可学习的查询和键投影。
+
+**理论解释：** 自注意力池化让模型自适应地决定工作记忆中哪些位置对当前意图最重要。相比简单取最后位置，注意力池化能够捕获工作记忆中多个位置的互补信息——例如用户可能在最近 5 次交互中既浏览了电子产品又浏览了书籍，注意力池化可以根据上下文动态分配权重，而非只关注最后一次交互。
 
 ### 3.3 模块二：语义记忆巩固机制 (Semantic Memory Consolidation)
 
@@ -167,19 +175,41 @@ $$\mathcal{L}_{\text{rec}} = -\log \frac{\exp(\mathbf{z}_u^\top \mathbf{e}_{i^+}
 
 #### 2. 意图引导的正交一致性损失 (Intent Orthogonal Loss)
 
-为了防止原型池 $\mathbf{P}$ 中的意图退化为同质化特征，我们引入余弦正交损失，强制各种长期记忆槽互斥：
+为了防止原型池 $\mathbf{P}$ 中的意图退化为同质化特征，我们引入**最大余弦相似度惩罚**，对每个原型只惩罚它与最相似原型之间的余弦相似度：
 
-$$\mathcal{L}_{\text{ortho}} = \sum_{i=1}^K \sum_{j=i+1}^K |\cos(\mathbf{p}_i, \mathbf{p}_j)|$$
+$$\mathcal{L}_{\text{ortho}} = \frac{1}{K} \sum_{k=1}^K \max_{j \neq k} \cos(\mathbf{p}_k, \mathbf{p}_j)$$
 
-#### 3. 频域重建辅助损失 (Frequency-Consistency Loss)
+**理论解释：** 相比两两正交约束（$\sum_{i<j}|\cos(\mathbf{p}_i, \mathbf{p}_j)|$），最大余弦相似度惩罚更加温和且实际可行。两两正交在 $K > d$ 时数学上不可能实现（$d$ 维空间最多容纳 $d$ 个正交向量），且优化困难。最大余弦惩罚只关注每个原型的"最近邻"，鼓励原型之间尽可能分散但不强制严格正交。注意该损失允许负值——当原型已经足够分散（最大余弦相似度为负）时，损失为负，相当于给予"奖励"信号，引导优化器维持原型的分散状态。
 
-为了指导WEBD模块不要过度滤除有用信号，我们强制最终的用户表示 $\mathbf{z}_u$ 的能量谱特征与其真实target的能量谱尽可能对齐：
+#### 3. 频域一致性损失 (Frequency-Consistency Loss)
 
-$$\mathcal{L}_{\text{freq}} = || \text{FFT}(\mathbf{z}_u) - \text{FFT}(\mathbf{e}_{i^+}) ||_2^2$$
+为了约束 WEBD 模块不要过度滤除有用信号，我们在去噪前后的工作记忆序列上计算频谱差异：
+
+$$\mathcal{L}_{\text{freq}} = \frac{1}{d} \sum_c || |\mathbf{F}_{\text{denoised}}[:,c]| - |\mathbf{F}_{\text{raw}}[:,c]| ||_2^2$$
+
+其中 $\mathbf{F}_{\text{raw}}$ 和 $\mathbf{F}_{\text{denoised}}$ 分别是去噪前后工作记忆序列在序列维度上的 FFT 幅度谱。
+
+**理论解释：** 小波去噪的软阈值操作会修改高频系数，如果阈值过大，有用的突发性意图信号也会被误删。频域一致性损失通过约束去噪前后的整体频谱结构不发生剧烈变化，为去噪过程提供了一个"保守性"正则化——允许局部的高频噪声被清除，但不允许整体频谱特征被大幅改变。这确保了 WEBD 模块在去噪和保留信号之间取得平衡。
+
+#### 4. 序列对齐对比损失 (Contrastive Loss)
+
+采用掩码增强的对比学习，拉近正常前向和掩码前向产生的用户表示：
+
+$$\mathcal{L}_{\text{cl}} = \frac{1}{2}(\text{InfoNCE}(\mathbf{z}_u, \mathbf{z}_u^{\text{mask}}) + \text{InfoNCE}(\mathbf{z}_u^{\text{mask}}, \mathbf{z}_u))$$
+
+**理论解释：** 对 VQ 语义码进行随机掩码后重新编码，产生同一用户的增强视图 $\mathbf{z}_u^{\text{mask}}$。对比损失强制模型学到对局部编码扰动鲁棒的用户表示——即使部分语义码被遮蔽，模型仍应产生相似的用户意图表示。这增强了表示的泛化能力，防止模型过度依赖个别 VQ 码。
+
+#### 5. 掩码编码建模损失 (Masked Code Modeling Loss)
+
+对 VQ 语义码进行随机掩码，预测被掩码的编码：
+
+$$\mathcal{L}_{\text{mlm}} = \text{CE}(\text{MLP}(\mathbf{h}_{\text{masked}}), \mathbf{c}_{\text{target}})$$
+
+**理论解释：** 类似于 BERT 的掩码语言模型，掩码编码建模迫使 Q-Former 编码器学习 VQ 码之间的内在关联——例如，同一商品的不同视角（标题、品牌、类别）的语义码之间存在强相关性。通过预测被掩码的码，编码器能够捕获这些跨视角的语义一致性，产生更丰富的商品表示。
 
 #### 最终联合损失为：
 
-$$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{ortho}} + \lambda_2 \mathcal{L}_{\text{freq}}$$
+$$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{cl}} + \lambda_2 \mathcal{L}_{\text{mlm}} + \lambda_3 \mathcal{L}_{\text{ortho}} + \lambda_4 \mathcal{L}_{\text{freq}} + \lambda_5 \mathcal{L}_{\text{decouple}}$$
 
 ---
 
@@ -247,6 +277,65 @@ $$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{cl}} + \
 2. **Novelty 的多重护城河**：即便有审稿人指出"Wavelet"在推荐中已被使用，我们可以强势回应：本文的核心贡献并非单独的 Wavelet，而是利用 Wavelet 解决 Working Memory 中突发意图的清洗，并与后端的**解耦语义记忆检索（Decoupled Retrieval）**联合，彻底攻克了"表示坍塌"和"循环依赖"这个在2025/2026年才被陆续揭露的领域痛点。
 
 3. **端到端的架构闭环**：故事线从心理学的"情景缓冲器"出发，在前端处理即时记忆（小波去噪），在后端处理长期记忆（意图巩固），并在中枢解耦交互，所有数学公式均服务于这一统一的认知哲学。
+
+---
+
+## 完整方法流程梳理（代码实现对应）
+
+以下是 CEB-Net 从输入到输出的完整数据流，与代码实现一一对应：
+
+```
+输入: item_seq [B, L], item_seq_len [B], code_seq [B*L, C]
+│
+▼ Step 1: VQ 语义编码 (_encode_items)
+├─ query_code_embedding(code_seq) → [B*L, C, d]
+├─ item_text_embedding[j](items) → stack → [B*L, text_num, d]
+├─ Q-Former(query, text)[-1].mean(dim=1) + query.mean(dim=1) → [B*L, d]
+└─ reshape → item_emb [B, L, d], code_emb [B*L, C, d]
+│
+▼ Step 2: 序列分割 (for-loop, 右对齐)
+├─ 工作记忆: 最后 m 个有效交互 → x_wm [B, m, d], wm_valid [B, m]
+└─ 长期历史: 前 L-m 个交互 → x_long [B, L-m, d], long_valid [B, L-m]
+│
+├─────────────────────────────────┐
+▼                                 ▼
+Step 3: WEBD (工作记忆去噪)       Step 4: SMC (长期记忆巩固)
+├─ + PE → LN → Dropout            ├─ + PE → LN → Dropout
+├─ CausalTransformer(2层)          ├─ BiTransformer(1层)
+├─ 多尺度DWT(J=2级)               ├─ 时间衰减原型分配
+│  ├─ Level 1: DWT → 软阈值       │  ├─ sim = proj(x) @ proj(P).T
+│  └─ Level 2: DWT → 软阈值       │  ├─ + γ·log(δ+1) 衰减偏置
+├─ 多尺度IDWT重构                  │  └─ softmax → assign [B,n,K]
+├─ Dropout                        ├─ 加权聚合 → memory [B, K, d]
+└─ 注意力池化 → anchor [B,d]   └─ ortho_loss: max cos sim
+│                                 │
+└─────────────┬───────────────────┘
+              ▼
+Step 5: DEBR (解耦检索与融合)
+├─ 检索子空间: W_attn(anchor) @ W_attn(memory).T → w [B, K]
+├─ 表示子空间: w @ W_repr(memory) → z_long [B, d]
+├─ 门控融合: g = σ(W_g[anchor; z_long])
+├─ z_u = g·anchor + (1-g)·z_long → LayerNorm
+└─ decouple_loss: ||W_attn.T @ W_repr||_F²
+│
+▼ Step 6: 损失计算
+├─ L_rec: InfoNCE(z_u, pos/neg item embeddings)
+├─ L_cl: InfoNCE(z_u, z_u_masked) 双向
+├─ L_mlm: CE(masked_code_output, code_labels)
+├─ L_ortho: (1/K)Σ max_{j≠k} cos(p_k, p_j)
+├─ L_freq: MSE(|FFT(x_before_dwt)|, |FFT(x_denoised)|)
+├─ L_decouple: ||W_attn.T @ W_repr||_F²
+└─ L = L_rec + λ₁L_cl + λ₂L_mlm + λ₃L_ortho + λ₄L_freq + λ₅L_decouple
+
+推理: z_u = F.normalize(z_u) @ F.normalize(all_item_emb).T → scores
+```
+
+**关键设计决策：**
+- 无外层位置编码：WEBD 和 SMC 各自内部处理位置编码，避免双重叠加
+- 工作记忆右对齐：短序列左边补零，确保最后一个位置始终是最新交互
+- anchor 自注意力池化：自适应加权工作记忆中各位置的贡献，捕获多兴趣互补信息
+- ortho_loss 无 ReLU：允许负值（原型已分散时给予奖励信号）
+- _encode_items 加 query 残差：与 get_item_embedding/encode_item 保持一致
 
 ---
 
