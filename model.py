@@ -427,10 +427,7 @@ class CEBNet(nn.Module):
             module.weight.data.fill_(1.0)
 
     def _encode_items(self, item_seq, code_seq):
-        """VQ Encoder: Q-Former. Returns item_emb [B,L,d] and code_emb [B*L,C,d].
-        Note: sequence item embeddings use qformer.mean only (no query residual),
-        matching CCFRec's forward() behavior. The query residual is only added in
-        get_item_embedding() and encode_item() for the item-side representations."""
+        """VQ Encoder: Q-Former + query residual. Returns item_emb [B,L,d] and code_emb [B*L,C,d]."""
         B, L = item_seq.size()
         item_flatten = item_seq.reshape(-1)
         query_emb = self.query_code_embedding(code_seq)  # [B*L, C, d]
@@ -448,13 +445,12 @@ class CEBNet(nn.Module):
 
     def forward(self, item_seq, item_seq_len, code_seq):
         """
-        CEB-Net forward pass (matches CEB.md methodology exactly):
-        1. VQ encode → item embeddings
-        2. Add position encoding
-        3. Split into working memory + long-term history
-        4. WEBD: working memory denoising → anchor
-        5. SMC: long-term history consolidation → memory
-        6. DEBR: decoupled retrieval + fusion → z_u
+        CEB-Net forward pass:
+        1. VQ encode → item embeddings (with query residual)
+        2. Split into working memory + long-term history (no outer PE)
+        3. WEBD: working memory denoising → anchor
+        4. SMC: long-term history consolidation → memory
+        5. DEBR: decoupled retrieval + fusion → z_u
 
         Returns: z_u [B,d], code_emb [B*L,C,d], x_before_dwt [B,m,d], x_denoised [B,m,d]
         """

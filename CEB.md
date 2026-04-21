@@ -76,21 +76,29 @@ $$\mathbf{A}, \mathbf{D} = \text{DWT}(\mathbf{X}'_{wm})$$
 
 其中 $\mathbf{A}$ 是保留平稳趋势的近似系数（低频），$\mathbf{D}$ 是捕获局部波动的细节系数（高频）。
 
-区别于传统频域方法简单抑制高频，我们设计了**上下文感知的动态软阈值（Context-aware Soft Thresholding）**：
+区别于传统频域方法简单抑制高频，我们设计了**上下文感知的动态软阈值（Context-aware Soft Thresholding）**。阈值由一个轻量神经网络根据序列的全局上下文动态生成：
 
-$$\tau = \alpha \cdot \text{Std}(\mathbf{D}) + \beta \cdot \text{Mean}(|\mathbf{D}|)$$
+$$\tau = \text{ThresholdNet}(\text{MaskedMean}(\mathbf{X}'_{wm})) \cdot \alpha$$
+
+其中 $\text{ThresholdNet}$ 是一个两层 MLP（Linear→ReLU→Linear→Sigmoid），$\alpha$ 是可学习的缩放因子。
 
 随后，仅对高频细节系数 $\mathbf{D}$ 进行软阈值截断：
 
 $$\mathbf{D}_{\text{clean}} = \text{sign}(\mathbf{D}) \cdot \max(|\mathbf{D}| - \tau, 0)$$
 
-**理论解释：** 这一数学映射极其精妙，它将低于阈值 $\tau$ 的细微随机波动（误点击）强行归零，但完全保留了远高于阈值的巨大尖峰（代表用户的密集、突发性强意图）。
+**理论解释：** 与传统信号处理中使用固定统计量（如 $\text{Std}(\mathbf{D})$）作为阈值不同，我们采用可学习的神经网络动态生成阈值。这是因为推荐场景中的"噪声"定义是语义层面的（误点击 vs 真实意图），而非数值层面的。神经网络能够从序列的全局上下文中学习到"什么程度的高频波动是噪声"这一语义判断，而统计量只能捕获数值分布特征。Sigmoid 激活确保阈值为正，可学习的缩放因子 $\alpha$ 控制去噪的整体强度。软阈值函数 $\text{sign}(\mathbf{D}) \cdot \max(|\mathbf{D}| - \tau, 0)$ 将低于阈值的细微随机波动（误点击）强行归零，但完全保留远高于阈值的巨大尖峰（代表用户的密集、突发性强意图）。
 
 去噪后，我们通过逆小波变换（IDWT）重构干净的工作记忆序列：
 
 $$\mathbf{X}''_{wm} = \text{IDWT}(\mathbf{A}, \mathbf{D}_{\text{clean}})$$
 
-最后，应用一层自注意力池化，将其提炼为极其纯净的**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$。
+最后，应用一层**自注意力池化（Self-Attention Pooling）**，将去噪后的工作记忆序列提炼为**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$：
+
+$$\alpha_i = \frac{\exp(\mathbf{q}_i^\top \mathbf{k}_i / \sqrt{d})}{\sum_{j=1}^m \exp(\mathbf{q}_j^\top \mathbf{k}_j / \sqrt{d})}, \quad \mathbf{z}_{\text{anchor}} = \sum_{i=1}^m \alpha_i \cdot \mathbf{x}''_i$$
+
+其中 $\mathbf{q}_i = \mathbf{W}_q \mathbf{x}''_i$，$\mathbf{k}_i = \mathbf{W}_k \mathbf{x}''_i$ 是可学习的查询和键投影。
+
+**理论解释：** 自注意力池化让模型自适应地决定工作记忆中哪些位置对当前意图最重要。相比简单取最后位置或均值池化，注意力池化能够捕获工作记忆中多个位置的互补信息——例如用户可能在最近 5 次交互中既浏览了电子产品又浏览了书籍，注意力池化可以根据上下文动态分配权重，而非只关注最后一次交互。
 
 ### 3.3 模块二：语义记忆巩固机制 (Semantic Memory Consolidation)
 
@@ -167,19 +175,41 @@ $$\mathcal{L}_{\text{rec}} = -\log \frac{\exp(\mathbf{z}_u^\top \mathbf{e}_{i^+}
 
 #### 2. 意图引导的正交一致性损失 (Intent Orthogonal Loss)
 
-为了防止原型池 $\mathbf{P}$ 中的意图退化为同质化特征，我们引入余弦正交损失，强制各种长期记忆槽互斥：
+为了防止原型池 $\mathbf{P}$ 中的意图退化为同质化特征，我们引入**最大余弦相似度惩罚**，对每个原型只惩罚它与最相似原型之间的余弦相似度：
 
-$$\mathcal{L}_{\text{ortho}} = \sum_{i=1}^K \sum_{j=i+1}^K |\cos(\mathbf{p}_i, \mathbf{p}_j)|$$
+$$\mathcal{L}_{\text{ortho}} = \frac{1}{K} \sum_{k=1}^K \max_{j \neq k} \cos(\mathbf{p}_k, \mathbf{p}_j)$$
 
-#### 3. 频域重建辅助损失 (Frequency-Consistency Loss)
+**理论解释：** 相比两两正交约束，最大余弦相似度惩罚更加温和且实际可行。两两正交在 $K > d$ 时数学上不可能实现，且优化困难。最大余弦惩罚只关注每个原型的"最近邻"，鼓励原型之间尽可能分散但不强制严格正交。该损失允许负值——当原型已经足够分散时，损失为负，相当于给予"奖励"信号。
 
-为了指导WEBD模块不要过度滤除有用信号，我们强制最终的用户表示 $\mathbf{z}_u$ 的能量谱特征与其真实target的能量谱尽可能对齐：
+#### 3. 频域一致性损失 (Frequency-Consistency Loss)
 
-$$\mathcal{L}_{\text{freq}} = || \text{FFT}(\mathbf{z}_u) - \text{FFT}(\mathbf{e}_{i^+}) ||_2^2$$
+为了约束 WEBD 模块不要过度滤除有用信号，我们在去噪前后的工作记忆序列上计算频谱差异：
+
+$$\mathcal{L}_{\text{freq}} = \frac{1}{d} \sum_c || |\mathbf{F}_{\text{denoised}}[:,c]| - |\mathbf{F}_{\text{raw}}[:,c]| ||_2^2$$
+
+其中 $\mathbf{F}_{\text{raw}}$ 和 $\mathbf{F}_{\text{denoised}}$ 分别是 Rehearsal 编码后（去噪前）和小波去噪后的工作记忆序列在序列维度上的 FFT 幅度谱。
+
+**理论解释：** 频域一致性损失为去噪过程提供了"保守性"正则化——允许局部的高频噪声被清除，但不允许整体频谱特征被大幅改变，确保 WEBD 在去噪和保留信号之间取得平衡。
+
+#### 4. 序列对齐对比损失 (Contrastive Loss)
+
+采用掩码增强的对比学习，拉近正常前向和掩码前向产生的用户表示：
+
+$$\mathcal{L}_{\text{cl}} = \frac{1}{2}(\text{InfoNCE}(\mathbf{z}_u, \mathbf{z}_u^{\text{mask}}) + \text{InfoNCE}(\mathbf{z}_u^{\text{mask}}, \mathbf{z}_u))$$
+
+**理论解释：** 对 VQ 语义码进行随机掩码后重新编码，产生同一用户的增强视图。对比损失强制模型学到对局部编码扰动鲁棒的用户表示，增强泛化能力。
+
+#### 5. 掩码编码建模损失 (Masked Code Modeling Loss)
+
+对 VQ 语义码进行随机掩码，预测被掩码的编码：
+
+$$\mathcal{L}_{\text{mlm}} = \text{CE}(\text{Normalize}(\mathbf{h}_{\text{masked}}) \cdot \text{Normalize}(\mathbf{W}_{\text{code}})^\top / \tau, \mathbf{c}_{\text{target}})$$
+
+**理论解释：** 掩码编码建模迫使 Q-Former 编码器学习 VQ 码之间的内在关联，捕获跨视角的语义一致性。
 
 #### 最终联合损失为：
 
-$$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{ortho}} + \lambda_2 \mathcal{L}_{\text{freq}}$$
+$$\mathcal{L} = \mathcal{L}_{\text{rec}} + \lambda_1 \mathcal{L}_{\text{cl}} + \lambda_2 \mathcal{L}_{\text{mlm}} + \lambda_3 \mathcal{L}_{\text{ortho}} + \lambda_4 \mathcal{L}_{\text{freq}}$$
 
 ---
 
