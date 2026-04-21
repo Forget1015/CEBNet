@@ -183,8 +183,15 @@ class WaveletBurstDenoiser(nn.Module):
 
         x_denoised = self.dropout(reconstructed)
 
-        # Gather last valid position (right-aligned, so always m-1)
-        anchor = x_denoised[:, -1, :]
+        # Attention pooling → anchor
+        q = self.attn_pool_q(x_denoised)
+        k = self.attn_pool_k(x_denoised)
+        scores = (q * k).sum(-1) / math.sqrt(d)
+        if mask is not None:
+            scores = scores.masked_fill(~mask, -1e9)
+        weights = F.softmax(scores, dim=-1).unsqueeze(-1)
+        anchor = (x_denoised * weights).sum(1)
+        anchor = self.attn_pool_ln(anchor)
 
         return anchor, x_before_dwt, x_denoised
 
