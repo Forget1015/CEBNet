@@ -92,9 +92,13 @@ $$\mathbf{D}_{\text{clean}} = \text{sign}(\mathbf{D}) \cdot \max(|\mathbf{D}| - 
 
 $$\mathbf{X}''_{wm} = \text{IDWT}(\mathbf{A}, \mathbf{D}_{\text{clean}})$$
 
-最后，取因果 Transformer 编码后去噪序列的**最后一个有效位置**的输出作为**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$。
+最后，应用一层**自注意力池化（Self-Attention Pooling）**，将去噪后的工作记忆序列提炼为**即时意图向量（Immediate Intent Anchor）** $\mathbf{z}_{\text{anchor}} \in \mathbb{R}^d$：
 
-**理论解释：** 在因果自注意力架构中，每个位置只能关注其之前的所有位置。因此，序列的最后一个位置天然聚合了整个工作记忆区的完整上下文信息，是信息量最大的单一表示。相比注意力池化（对所有位置做加权平均），直接取最后位置避免了将已经过因果编码的层次化表示重新混合为扁平化的平均向量，保留了因果 Transformer 学到的时序递进结构。这一设计与主流序列推荐模型（如 SASRec、BERT4Rec）中取最后位置作为序列表示的做法一致。
+$$\alpha_i = \frac{\exp(\mathbf{q}_i^\top \mathbf{k}_i / \sqrt{d})}{\sum_{j=1}^m \exp(\mathbf{q}_j^\top \mathbf{k}_j / \sqrt{d})}, \quad \mathbf{z}_{\text{anchor}} = \sum_{i=1}^m \alpha_i \cdot \mathbf{x}''_i$$
+
+其中 $\mathbf{q}_i = \mathbf{W}_q \mathbf{x}''_i$，$\mathbf{k}_i = \mathbf{W}_k \mathbf{x}''_i$ 是可学习的查询和键投影。
+
+**理论解释：** 自注意力池化让模型自适应地决定工作记忆中哪些位置对当前意图最重要。相比简单取最后位置，注意力池化能够捕获工作记忆中多个位置的互补信息——例如用户可能在最近 5 次交互中既浏览了电子产品又浏览了书籍，注意力池化可以根据上下文动态分配权重，而非只关注最后一次交互。
 
 ### 3.3 模块二：语义记忆巩固机制 (Semantic Memory Consolidation)
 
@@ -303,7 +307,7 @@ Step 3: WEBD (工作记忆去噪)       Step 4: SMC (长期记忆巩固)
 │  └─ Level 2: DWT → 软阈值       │  ├─ + γ·log(δ+1) 衰减偏置
 ├─ 多尺度IDWT重构                  │  └─ softmax → assign [B,n,K]
 ├─ Dropout                        ├─ 加权聚合 → memory [B, K, d]
-└─ Gather最后位置 → anchor [B,d]   └─ ortho_loss: max cos sim
+└─ 注意力池化 → anchor [B,d]   └─ ortho_loss: max cos sim
 │                                 │
 └─────────────┬───────────────────┘
               ▼
@@ -329,7 +333,7 @@ Step 5: DEBR (解耦检索与融合)
 **关键设计决策：**
 - 无外层位置编码：WEBD 和 SMC 各自内部处理位置编码，避免双重叠加
 - 工作记忆右对齐：短序列左边补零，确保最后一个位置始终是最新交互
-- anchor 取最后位置：因果 Transformer 的最后位置包含所有之前交互的信息
+- anchor 自注意力池化：自适应加权工作记忆中各位置的贡献，捕获多兴趣互补信息
 - ortho_loss 无 ReLU：允许负值（原型已分散时给予奖励信号）
 - _encode_items 加 query 残差：与 get_item_embedding/encode_item 保持一致
 
