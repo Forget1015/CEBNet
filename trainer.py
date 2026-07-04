@@ -124,6 +124,15 @@ class CEBNetTrainer(object):
             total_loss[k] /= total_num
         return total_loss
 
+    def _mask_history_scores(self, scores, item_inters, inter_lens):
+        scores = scores.clone()
+        for row in range(scores.size(0)):
+            hist_len = inter_lens[row].item()
+            if hist_len > 0:
+                hist_items = item_inters[row, :hist_len]
+                scores[row, hist_items] = -float('inf')
+        return scores
+
     def evaluate(self, scores, labels):
         metrics = {m: 0 for m in self.all_metrics}
         _, topk_idx = torch.topk(scores, self.max_topk, dim=-1)
@@ -196,6 +205,10 @@ class CEBNetTrainer(object):
                     cur_eval_step += 1
                 if verbose:
                     self.log(f"[Epoch {epoch_idx}] Val Result: {metrics}")
+                if getattr(self.args, 'eval_test_each_epoch', False) and self.test_data is not None:
+                    test_metrics = self._test_epoch(test_data=self.test_data, verbose=verbose)
+                    if verbose:
+                        self.log(f"[Epoch {epoch_idx}] Test Result: {test_metrics}")
                 if cur_eval_step >= self.early_stop:
                     break
 
@@ -235,6 +248,8 @@ class CEBNetTrainer(object):
 
             total += len(labels)
             scores = self.model.full_sort_predict(item_inters, inter_lens, code_inters)
+            if getattr(self.args, 'mask_history_in_eval', False):
+                scores = self._mask_history_scores(scores, item_inters, inter_lens)
 
             _metrics = self.evaluate(scores, labels)
             for m, v in _metrics.items():

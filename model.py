@@ -287,6 +287,14 @@ class DecoupledEpisodicBuffer(nn.Module):
         )
         self.layer_norm = nn.LayerNorm(hidden_size)
 
+    def retrieve(self, anchor, memory):
+        q = self.W_attn_anchor(anchor)
+        k = self.W_attn_memory(memory)
+        scores = torch.bmm(k, q.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.attn_size)
+        w = F.softmax(scores, dim=-1)
+        v = self.W_repr_memory(memory)
+        return torch.bmm(w.unsqueeze(1), v).squeeze(1)
+
     def forward(self, anchor, memory):
         """
         Args:
@@ -295,14 +303,7 @@ class DecoupledEpisodicBuffer(nn.Module):
         Returns:
             z_u: [B, d]
         """
-        q = self.W_attn_anchor(anchor)
-        k = self.W_attn_memory(memory)
-        scores = torch.bmm(k, q.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.attn_size)
-        w = F.softmax(scores, dim=-1)
-
-        v = self.W_repr_memory(memory)
-        z_long = torch.bmm(w.unsqueeze(1), v).squeeze(1)
-
+        z_long = self.retrieve(anchor, memory)
         g = self.fusion_gate(torch.cat([anchor, z_long], dim=-1))
         z_u = g * anchor + (1 - g) * z_long
         return self.layer_norm(z_u)
@@ -318,6 +319,30 @@ class FrequencyConsistencyLoss(nn.Module):
         F_after = torch.fft.rfft(x_after, dim=1)
         diff = (torch.abs(F_after) - torch.abs(F_before)) ** 2
         return diff.sum(dim=1).mean(dim=-1).mean()
+
+
+class SemanticCalibrationLayer(nn.Module):
+    def __init__(self, hidden_size, max_seq_length, weight=0.2, dropout=0.1, layer_norm_eps=1e-12):
+        super().__init__()
+        self.weight = weight
+        self.freq_gate = nn.Parameter(torch.zeros(max_seq_length // 2 + 1, hidden_size))
+        self.residual_gate = nn.Linear(hidden_size, hidden_size)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(hidden_size, eps=layer_norm_eps)
+
+    def forward(self, item_emb, item_seq_len):
+        B, L, _ = item_emb.size()
+        valid = torch.arange(L, device=item_emb.device).unsqueeze(0) < item_seq_len.unsqueeze(1)
+        valid_mask = valid.unsqueeze(-1)
+
+        x = item_emb * valid_mask.to(item_emb.dtype)
+        spectrum = torch.fft.rfft(x.float(), dim=1, norm='ortho')
+        freq_gate = torch.sigmoid(self.freq_gate[:spectrum.size(1)]).unsqueeze(0)
+        calibrated = torch.fft.irfft(spectrum * freq_gate, n=L, dim=1, norm='ortho').to(item_emb.dtype)
+
+        residual_gate = torch.sigmoid(self.residual_gate(item_emb))
+        updated = self.layer_norm(item_emb + self.weight * residual_gate * self.dropout(calibrated))
+        return torch.where(valid_mask, updated, item_emb)
 
 
 # ============================================================
@@ -377,6 +402,16 @@ class CEBNet(nn.Module):
             for _ in range(self.text_num)
         ])
         self.item_text_embedding.requires_grad_(False)
+        self.use_id_residual = getattr(args, 'use_id_residual', False)
+        if self.use_id_residual:
+            self.item_id_embedding = nn.Embedding(self.n_items, self.embedding_size, padding_idx=0)
+            self.id_residual_gate = nn.Linear(self.embedding_size * 2, self.embedding_size)
+        self.use_decoupled_trace_id = getattr(args, 'use_decoupled_trace_id', False)
+        self.trace_id_gate_bias_init = getattr(args, 'trace_id_gate_bias_init', -2.0)
+        if self.use_decoupled_trace_id:
+            self.trace_item_id_embedding = nn.Embedding(self.n_items, self.embedding_size, padding_idx=0)
+            self.trace_id_gate = nn.Linear(self.embedding_size * 2, self.embedding_size)
+            self.trace_id_norm = nn.LayerNorm(self.embedding_size, eps=self.layer_norm_eps)
 
         # Q-Former (from CCFRec)
         self.qformer = CrossAttTransformer(
@@ -409,6 +444,44 @@ class CEBNet(nn.Module):
             self.embedding_size, attn_size=self.attn_size
         )
 
+        self.use_semantic_calibration = getattr(args, 'use_semantic_calibration', False)
+        self.calibration_mode = getattr(args, 'calibration_mode', 'fft')
+        self.calibration_weight = getattr(args, 'calibration_weight', 0.2)
+        self.calibration_gate_bias_init = getattr(args, 'calibration_gate_bias_init', -2.0)
+        if self.use_semantic_calibration:
+            self.semantic_calibration = SemanticCalibrationLayer(
+                self.embedding_size, self.max_seq_length,
+                weight=self.calibration_weight,
+                dropout=self.hidden_dropout_prob,
+                layer_norm_eps=self.layer_norm_eps,
+            )
+
+        self.use_seq_branch = getattr(args, 'use_seq_branch', False)
+        self.n_layers_seq = getattr(args, 'n_layers_seq', 2)
+        self.seq_fusion_mode = getattr(args, 'seq_fusion_mode', 'gate')
+        self.seq_gate_bias_init = getattr(args, 'seq_gate_bias_init', -2.0)
+        self.seq_add_weight = getattr(args, 'seq_add_weight', 0.2)
+        self.trace_memory_gate_bias_init = getattr(args, 'trace_memory_gate_bias_init', -2.0)
+        self.trace_aux_rec_weight = getattr(args, 'trace_aux_rec_weight', 0.0)
+        self.history_neg_weight = getattr(args, 'history_neg_weight', 0.0)
+        self.history_neg_num = getattr(args, 'history_neg_num', 20)
+        if self.use_seq_branch:
+            self.seq_encoder = Transformer(
+                n_layers=self.n_layers_seq, n_heads=self.n_heads,
+                hidden_size=self.embedding_size, inner_size=self.hidden_size,
+                hidden_dropout_prob=self.hidden_dropout_prob,
+                attn_dropout_prob=self.attn_dropout_prob,
+                hidden_act=self.hidden_act, layer_norm_eps=self.layer_norm_eps,
+            )
+            self.seq_layer_norm = nn.LayerNorm(self.embedding_size, eps=self.layer_norm_eps)
+            self.seq_dropout = nn.Dropout(self.hidden_dropout_prob)
+            self.seq_output_norm = nn.LayerNorm(self.embedding_size, eps=self.layer_norm_eps)
+            if self.seq_fusion_mode == 'gate':
+                self.seq_fusion_gate = nn.Linear(self.embedding_size * 2, self.embedding_size)
+            if self.seq_fusion_mode == 'trace_residual_debr':
+                self.trace_memory_gate = nn.Linear(self.embedding_size * 2, self.embedding_size)
+            self.seq_fusion_norm = nn.LayerNorm(self.embedding_size, eps=self.layer_norm_eps)
+
         self.freq_loss_fn = FrequencyConsistencyLoss()
         self.loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -416,6 +489,14 @@ class CEBNet(nn.Module):
         self._all_item_array = None
 
         self.apply(self._init_weights)
+        if self.use_decoupled_trace_id:
+            nn.init.constant_(self.trace_id_gate.bias, self.trace_id_gate_bias_init)
+        if self.use_semantic_calibration:
+            nn.init.constant_(self.semantic_calibration.residual_gate.bias, self.calibration_gate_bias_init)
+        if self.use_seq_branch and self.seq_fusion_mode == 'gate':
+            nn.init.constant_(self.seq_fusion_gate.bias, self.seq_gate_bias_init)
+        if self.use_seq_branch and self.seq_fusion_mode == 'trace_residual_debr':
+            nn.init.constant_(self.trace_memory_gate.bias, self.trace_memory_gate_bias_init)
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -425,6 +506,53 @@ class CEBNet(nn.Module):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _apply_id_residual(self, item_ids, semantic_emb):
+        if not self.use_id_residual:
+            return semantic_emb
+        id_emb = self.item_id_embedding(item_ids)
+        gate = torch.sigmoid(self.id_residual_gate(torch.cat([semantic_emb, id_emb], dim=-1)))
+        return gate * semantic_emb + (1.0 - gate) * id_emb
+
+    def _apply_decoupled_trace_id(self, item_ids, semantic_emb):
+        if not self.use_decoupled_trace_id:
+            return semantic_emb
+        id_emb = self.trace_item_id_embedding(item_ids)
+        gate = torch.sigmoid(self.trace_id_gate(torch.cat([semantic_emb, id_emb], dim=-1)))
+        return self.trace_id_norm(semantic_emb + gate * id_emb)
+
+    def _encode_full_seq_branch(self, item_emb, item_seq_len):
+        B, L, _ = item_emb.size()
+        pos_ids = torch.arange(L, device=item_emb.device).unsqueeze(0).expand(B, -1)
+        seq_inp = self.seq_layer_norm(self.seq_dropout(item_emb + self.position_embedding(pos_ids)))
+
+        valid = torch.arange(L, device=item_emb.device).unsqueeze(0) < item_seq_len.unsqueeze(1)
+        causal = torch.tril(torch.ones(L, L, device=item_emb.device, dtype=torch.bool))
+        attn_mask = valid.unsqueeze(1).unsqueeze(2) & causal.unsqueeze(0).unsqueeze(0)
+        attn_mask = (1.0 - attn_mask.float()) * -1e9
+
+        seq_hidden = self.seq_encoder(seq_inp, seq_inp, attn_mask)[-1]
+        return self.seq_output_norm(seq_hidden)
+
+    def _encode_seq_branch(self, item_emb, item_seq_len):
+        B, _, _ = item_emb.size()
+        seq_hidden = self._encode_full_seq_branch(item_emb, item_seq_len)
+        last_idx = item_seq_len.clamp(min=1) - 1
+        batch_idx = torch.arange(B, device=item_emb.device)
+        return seq_hidden[batch_idx, last_idx]
+
+    def _fuse_seq_branch(self, z_ceb, z_seq):
+        if self.seq_fusion_mode == 'seq_only':
+            return self.seq_fusion_norm(z_seq)
+        if self.seq_fusion_mode == 'add':
+            return self.seq_fusion_norm(z_ceb + self.seq_add_weight * z_seq)
+        gate = torch.sigmoid(self.seq_fusion_gate(torch.cat([z_ceb, z_seq], dim=-1)))
+        return self.seq_fusion_norm((1.0 - gate) * z_ceb + gate * z_seq)
+
+    def _fuse_trace_memory(self, z_trace, memory):
+        r_mem = self.debr.retrieve(z_trace, memory)
+        gate = torch.sigmoid(self.trace_memory_gate(torch.cat([z_trace, r_mem], dim=-1)))
+        return self.seq_fusion_norm(z_trace + gate * r_mem)
 
     def _encode_items(self, item_seq, code_seq):
         """VQ Encoder: Q-Former + query residual. Returns item_emb [B,L,d] and code_emb [B*L,C,d]."""
@@ -438,12 +566,12 @@ class CEBNet(nn.Module):
         encoder_output = torch.stack(text_embs, dim=1)  # [B*L, text_num, d]
 
         item_seq_emb = self.qformer(query_emb, encoder_output)[-1]  # [B*L, C, d]
-        item_emb = item_seq_emb.mean(dim=1) + query_emb.mean(dim=1)  # [B*L, d]
+        item_emb = self._apply_id_residual(item_flatten, item_seq_emb.mean(dim=1) + query_emb.mean(dim=1))  # [B*L, d]
         item_emb = item_emb.view(B, L, -1)
 
         return item_emb, item_seq_emb
 
-    def forward(self, item_seq, item_seq_len, code_seq):
+    def forward(self, item_seq, item_seq_len, code_seq, return_trace=False):
         """
         CEB-Net forward pass:
         1. VQ encode → item embeddings (with query residual)
@@ -460,6 +588,13 @@ class CEBNet(nn.Module):
 
         # Step 1: VQ encode
         item_emb, code_emb = self._encode_items(item_seq, code_seq)
+        if self.use_semantic_calibration:
+            item_emb = self.semantic_calibration(item_emb, item_seq_len)
+        trace_item_emb = self._apply_decoupled_trace_id(item_seq, item_emb)
+        if self.use_seq_branch and self.seq_fusion_mode == 'seq_first_debr':
+            split_item_emb = self._encode_full_seq_branch(trace_item_emb, item_seq_len)
+        else:
+            split_item_emb = item_emb
 
         # Step 2: Split (no outer PE — WEBD and SMC handle their own)
         # For-loop split: right-aligned working memory
@@ -470,7 +605,7 @@ class CEBNet(nn.Module):
             seq_len = item_seq_len[i].item()
             wm_start = max(0, seq_len - m)
             actual_wm_len = min(m, seq_len)
-            x_wm[i, m - actual_wm_len:] = item_emb[i, wm_start:seq_len]
+            x_wm[i, m - actual_wm_len:] = split_item_emb[i, wm_start:seq_len]
             wm_valid[i, m - actual_wm_len:] = True
 
         x_wm_raw = x_wm.clone()
@@ -478,7 +613,7 @@ class CEBNet(nn.Module):
         long_len = L - m
         if long_len > 0:
             actual_long_lens = (item_seq_len - m).clamp(min=0)
-            x_long = item_emb[:, :long_len, :]
+            x_long = split_item_emb[:, :long_len, :]
             long_valid = torch.zeros(B, long_len, dtype=torch.bool, device=self.device)
             for i in range(B):
                 al = actual_long_lens[i].item()
@@ -487,7 +622,7 @@ class CEBNet(nn.Module):
                 else:
                     last_valid_idx = item_seq_len[i].item() - 1
                     if last_valid_idx >= 0:
-                        x_long[i, 0] = item_emb[i, last_valid_idx]
+                        x_long[i, 0] = split_item_emb[i, last_valid_idx]
                         long_valid[i, 0] = True
         else:
             x_long = x_wm_raw.clone()
@@ -500,8 +635,29 @@ class CEBNet(nn.Module):
         memory = self.smc(x_long, mask=long_valid)
 
         # Step 6: DEBR — decoupled retrieval and fusion
-        z_u = self.debr(anchor, memory)
+        z_trace = None
+        if self.use_seq_branch and self.seq_fusion_mode == 'trace_residual_debr':
+            z_trace = self._encode_seq_branch(trace_item_emb, item_seq_len)
+            working_memory = x_denoised * wm_valid.unsqueeze(-1).to(x_denoised.dtype)
+            trace_memory = torch.cat([working_memory, memory], dim=1)
+            z_u = self._fuse_trace_memory(z_trace, trace_memory)
+        else:
+            z_ceb = self.debr(anchor, memory)
+            if self.use_seq_branch:
+                if self.seq_fusion_mode == 'seq_first_debr':
+                    last_idx = item_seq_len.clamp(min=1) - 1
+                    batch_idx = torch.arange(B, device=item_emb.device)
+                    z_trace = split_item_emb[batch_idx, last_idx]
+                    z_u = z_ceb
+                else:
+                    z_seq = self._encode_seq_branch(trace_item_emb, item_seq_len)
+                    z_trace = z_seq
+                    z_u = self._fuse_seq_branch(z_ceb, z_seq)
+            else:
+                z_u = z_ceb
 
+        if return_trace:
+            return z_u, code_emb, x_before_dwt, x_denoised, z_trace
         return z_u, code_emb, x_before_dwt, x_denoised
 
     @torch.no_grad()
@@ -525,10 +681,26 @@ class CEBNet(nn.Module):
             batch_encoder_output = torch.stack(text_embs, dim=1)
 
             batch_item_seq_emb = self.qformer(batch_query_emb, batch_encoder_output)[-1]
-            batch_item_emb = batch_item_seq_emb.mean(dim=1) + batch_query_emb.mean(dim=1)
+            batch_item_emb = self._apply_id_residual(
+                batch_item, batch_item_seq_emb.mean(dim=1) + batch_query_emb.mean(dim=1))
+            batch_item_emb = self._apply_decoupled_trace_id(batch_item, batch_item_emb)
             item_embedding.append(batch_item_emb)
 
         return torch.cat(item_embedding, dim=0)
+
+    def _encode_item_ids(self, batch_item):
+        batch_query = self.index[batch_item]
+        batch_query_emb = self.query_code_embedding(batch_query)
+
+        text_embs = []
+        for j in range(self.text_num):
+            text_embs.append(self.item_text_embedding[j](batch_item))
+        batch_encoder_output = torch.stack(text_embs, dim=1)
+
+        batch_item_seq_emb = self.qformer(batch_query_emb, batch_encoder_output)[-1]
+        batch_item_emb = self._apply_id_residual(
+            batch_item, batch_item_seq_emb.mean(dim=1) + batch_query_emb.mean(dim=1))
+        return self._apply_decoupled_trace_id(batch_item, batch_item_emb)
 
     def encode_item(self, pos_items):
         """Encode pos + neg items for training loss."""
@@ -548,45 +720,87 @@ class CEBNet(nn.Module):
 
         B = len(pos_list)
         batch_item = torch.tensor(pos_list + candidates, device=self.device)
-        batch_query = self.index[batch_item]
-        batch_query_emb = self.query_code_embedding(batch_query)
-
-        text_embs = []
-        for j in range(self.text_num):
-            text_embs.append(self.item_text_embedding[j](batch_item))
-        batch_encoder_output = torch.stack(text_embs, dim=1)
-
-        batch_item_seq_emb = self.qformer(batch_query_emb, batch_encoder_output)[-1]
-        batch_item_emb = batch_item_seq_emb.mean(dim=1) + batch_query_emb.mean(dim=1)
+        batch_item_emb = self._encode_item_ids(batch_item)
 
         return batch_item_emb[:B], batch_item_emb[B:]
+
+    def _history_negative_loss(self, z_u, item_seq, item_seq_len, pos_logits):
+        if self.history_neg_weight <= 0 or self.history_neg_num <= 0:
+            return z_u.new_tensor(0.0)
+
+        hist_items = []
+        hist_rows = []
+        for row in range(item_seq.size(0)):
+            hist_len = item_seq_len[row].item()
+            if hist_len <= 0:
+                continue
+            start = max(0, hist_len - self.history_neg_num)
+            row_items = item_seq[row, start:hist_len]
+            if row_items.numel() == 0:
+                continue
+            hist_items.append(row_items)
+            hist_rows.append(torch.full((row_items.numel(),), row, device=self.device, dtype=torch.long))
+
+        if not hist_items:
+            return z_u.new_tensor(0.0)
+
+        hist_items = torch.cat(hist_items, dim=0)
+        hist_rows = torch.cat(hist_rows, dim=0)
+        hist_emb = self._encode_item_ids(hist_items)
+        hist_emb = F.normalize(hist_emb, dim=-1)
+        hist_logits = (z_u[hist_rows] * hist_emb).sum(dim=-1) / self.tau
+        pos_margin = pos_logits.squeeze(-1).detach()[hist_rows]
+        return F.softplus(hist_logits - pos_margin).mean()
 
     def calculate_loss(self, item_seq, item_seq_len, pos_items, code_seq_mask, labels_mask):
         B, L = item_seq.size()
         code_seq = self.index[item_seq].reshape(B * L, -1)
 
         # Normal forward
-        z_u, code_output, x_before_dwt, x_denoised = self.forward(item_seq, item_seq_len, code_seq)
+        use_trace_aux = self.trace_aux_rec_weight > 0 and self.use_seq_branch
+        if use_trace_aux:
+            z_u, code_output, x_before_dwt, x_denoised, z_trace = self.forward(
+                item_seq, item_seq_len, code_seq, return_trace=True)
+        else:
+            z_u, code_output, x_before_dwt, x_denoised = self.forward(item_seq, item_seq_len, code_seq)
+            z_trace = None
         # Masked forward (for contrastive learning)
         z_u_mask, code_output_mask, _, _ = self.forward(item_seq, item_seq_len, code_seq_mask)
 
         z_u = F.normalize(z_u, dim=-1)
         z_u_mask = F.normalize(z_u_mask, dim=-1)
+        if z_trace is not None:
+            z_trace = F.normalize(z_trace, dim=-1)
 
         # 1. Recommendation loss
+        trace_aux_rec_loss = z_u.new_tensor(0.0)
+        history_neg_loss = z_u.new_tensor(0.0)
         if self.neg_num > 0:
             pos_emb, neg_emb = self.encode_item(pos_items)
             pos_emb = F.normalize(pos_emb, dim=-1)
             neg_emb = F.normalize(neg_emb, dim=-1)
+            labels = torch.zeros(B, device=self.device).long()
+
             pos_logits = torch.bmm(z_u.unsqueeze(1), pos_emb.unsqueeze(2)).squeeze(-1) / self.tau
             neg_logits = torch.matmul(z_u, neg_emb.T) / self.tau
             logits = torch.cat([pos_logits, neg_logits], dim=1)
-            labels = torch.zeros(B, device=self.device).long()
             rec_loss = self.loss_fct(logits, labels)
+            history_neg_loss = self._history_negative_loss(z_u, item_seq, item_seq_len, pos_logits)
+
+            if z_trace is not None:
+                trace_pos_logits = torch.bmm(z_trace.unsqueeze(1), pos_emb.unsqueeze(2)).squeeze(-1) / self.tau
+                trace_neg_logits = torch.matmul(z_trace, neg_emb.T) / self.tau
+                trace_logits = torch.cat([trace_pos_logits, trace_neg_logits], dim=1)
+                trace_aux_rec_loss = self.loss_fct(trace_logits, labels)
         else:
             all_emb = F.normalize(self.get_item_embedding(), dim=-1)
             logits = torch.matmul(z_u, all_emb.T) / self.tau
             rec_loss = self.loss_fct(logits, pos_items)
+            pos_logits = logits.gather(1, pos_items.unsqueeze(1))
+            history_neg_loss = self._history_negative_loss(z_u, item_seq, item_seq_len, pos_logits)
+            if z_trace is not None:
+                trace_logits = torch.matmul(z_trace, all_emb.T) / self.tau
+                trace_aux_rec_loss = self.loss_fct(trace_logits, pos_items)
 
         # 2. Contrastive loss
         gathered = dist.is_initialized()
@@ -609,13 +823,16 @@ class CEBNet(nn.Module):
 
         # Total
         loss = (rec_loss
+                + self.trace_aux_rec_weight * trace_aux_rec_loss
+                + self.history_neg_weight * history_neg_loss
                 + self.cl_weight * cl_loss
                 + self.mlm_weight * mlm_loss
                 + self.ortho_weight * ortho_loss
                 + self.freq_weight * freq_loss)
 
-        return dict(loss=loss, rec_loss=rec_loss, cl_loss=cl_loss,
-                    mlm_loss=mlm_loss, ortho_loss=ortho_loss, freq_loss=freq_loss)
+        return dict(loss=loss, rec_loss=rec_loss, trace_aux_rec_loss=trace_aux_rec_loss,
+                    history_neg_loss=history_neg_loss, cl_loss=cl_loss, mlm_loss=mlm_loss,
+                    ortho_loss=ortho_loss, freq_loss=freq_loss)
 
     def full_sort_predict(self, item_seq, item_seq_len, code_seq):
         z_u, _, _, _ = self.forward(item_seq, item_seq_len, code_seq)

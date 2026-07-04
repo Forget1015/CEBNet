@@ -43,6 +43,10 @@ def parse_arguments():
     parser.add_argument('--warmup_steps', type=int, default=500)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--early_stop', type=int, default=10)
+    parser.add_argument('--eval_test_each_epoch', action='store_true',
+                        help='Evaluate the test set after each validation step for debugging')
+    parser.add_argument('--mask_history_in_eval', action='store_true',
+                        help='Mask items in the input history during full-sort evaluation')
 
     # Data
     parser.add_argument("--data_path", type=str, default="./dataset/")
@@ -61,6 +65,29 @@ def parse_arguments():
     parser.add_argument('--n_layers_cross', type=int, default=2)
     parser.add_argument('--dropout_prob', type=float, default=0.3)
     parser.add_argument('--dropout_prob_cross', type=float, default=0.3)
+    parser.add_argument('--use_id_residual', action='store_true',
+                        help='Fuse trainable item ID embeddings with semantic item embeddings')
+    parser.add_argument('--use_decoupled_trace_id', action='store_true',
+                        help='Use trainable ID embeddings only in the trace encoder and item scoring')
+    parser.add_argument('--trace_id_gate_bias_init', type=float, default=-2.0)
+    parser.add_argument('--use_seq_branch', action='store_true',
+                        help='Enable full-sequence causal Transformer user branch')
+    parser.add_argument('--n_layers_seq', type=int, default=2)
+    parser.add_argument('--seq_fusion_mode', type=str, default='gate',
+                        choices=['gate', 'add', 'seq_only', 'trace_residual_debr', 'seq_first_debr'])
+    parser.add_argument('--seq_gate_bias_init', type=float, default=-2.0)
+    parser.add_argument('--seq_add_weight', type=float, default=0.2)
+    parser.add_argument('--trace_memory_gate_bias_init', type=float, default=-2.0)
+    parser.add_argument('--trace_aux_rec_weight', type=float, default=0.0)
+    parser.add_argument('--history_neg_weight', type=float, default=0.0,
+                        help='Penalize high scores on history items during recommendation loss')
+    parser.add_argument('--history_neg_num', type=int, default=20,
+                        help='Maximum number of history items used by history negative loss')
+    parser.add_argument('--use_semantic_calibration', action='store_true',
+                        help='Enable sequence-level semantic calibration before memory encoding')
+    parser.add_argument('--calibration_mode', type=str, default='fft', choices=['fft'])
+    parser.add_argument('--calibration_weight', type=float, default=0.2)
+    parser.add_argument('--calibration_gate_bias_init', type=float, default=-2.0)
 
     # CEB-Net specific
     parser.add_argument('--wm_length', type=int, default=5)
@@ -97,6 +124,13 @@ if __name__ == "__main__":
         + f"_wm{args.wm_length}_K{args.n_prototypes}_wav{args.wavelet}"
         + f"_mlm{args.mlm_weight}_cl{args.cl_weight}"
         + f"_drop{args.dropout_prob}_dpcross{args.dropout_prob_cross}"
+        + ("_idres" if args.use_id_residual else "")
+        + ("_traceid" if args.use_decoupled_trace_id else "")
+        + (f"_seqL{args.n_layers_seq}_{args.seq_fusion_mode}" if args.use_seq_branch else "")
+        + (f"_traceaux{args.trace_aux_rec_weight}" if args.trace_aux_rec_weight > 0 else "")
+        + ("_histmask" if args.mask_history_in_eval else "")
+        + (f"_histneg{args.history_neg_weight}" if args.history_neg_weight > 0 else "")
+        + (f"_calib{args.calibration_mode}_w{args.calibration_weight}" if args.use_semantic_calibration else "")
     )
 
     init_seed(args.seed, True)
@@ -129,7 +163,7 @@ if __name__ == "__main__":
     # Load text embeddings
     text_embs = []
     for ttype in args.text_types:
-        if ttype not in ['meta', 'title', 'brand', 'features', 'categories', 'description']:
+        if ttype not in ['meta', 'title', 'brand', 'features', 'categories', 'description', 'genres']:
             raise ValueError(f"{ttype} not in valid text types")
         text_emb_file = f".t5.{ttype}.emb.npy"
         text_emb = np.load(os.path.join(args.data_path, args.dataset,
