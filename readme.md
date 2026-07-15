@@ -156,3 +156,294 @@ python main.py \
     --n_layers_smc=1 \
     --use_id_residual \
     --device=cuda:4
+
+
+  python main.py \
+      --seed=2020 \
+      --dataset=Industrial_and_Scientific \
+      --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 \
+      --n_codes_per_lel=256 \
+      --max_his_len=50 \
+      --mask_ratio=0.5 \
+      --embedding_size=128 \
+      --hidden_size=512 \
+      --n_heads=2 \
+      --n_layers=2 \
+      --n_layers_cross=2 \
+      --dropout_prob=0.2 \
+      --dropout_prob_cross=0.1 \
+      --wm_length=10 \
+      --n_prototypes=16 \
+      --wavelet=haar \
+      --n_layers_webd=2 \
+      --n_layers_smc=2 \
+      --disable_webd \
+      --no_webd_rehearsal \
+      --ortho_weight=0.1 \
+      --burst_loss_weight=0.05 \
+      --proto_temperature=1.0 \
+      --use_decoupled_trace_id \
+      --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch \
+      --n_layers_seq=2 \
+      --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 \
+      --seq_add_weight=0.2 \
+      --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 \
+      --history_neg_num=10 \
+      --lr=0.0005 \
+      --tau=0.05 \
+      --cl_weight=0.2 \
+      --mlm_weight=0.3 \
+      --neg_num=24000 \
+      --batch_size=300 \
+      --num_workers=8 \
+      --learner=AdamW \
+      --lr_scheduler_type=constant \
+      --warmup_steps=500 \
+      --weight_decay=0.0001 \
+      --epochs=500 \
+      --early_stop=10 \
+      --eval_step=1 \
+      --metrics="recall@5,ndcg@5,recall@10,ndcg@10" \
+      --valid_metric=ndcg@10 \
+      --device=cuda:5
+
+python main.py \
+      --seed=2020 \
+      --dataset=Industrial_and_Scientific \
+      --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 \
+      --n_codes_per_lel=256 \
+      --max_his_len=50 \
+      --mask_ratio=0.5 \
+      --embedding_size=128 \
+      --hidden_size=512 \
+      --n_heads=2 \
+      --n_layers=2 \
+      --n_layers_cross=2 \
+      --dropout_prob=0.2 \
+      --dropout_prob_cross=0.1 \
+      --wm_length=50 \
+      --n_prototypes=16 \
+      --wavelet=haar \
+      --n_layers_webd=2 \
+      --n_layers_smc=2 \
+      --no_webd_rehearsal \
+      --ortho_weight=0.1 \
+      --burst_loss_weight=0.05 \
+      --proto_temperature=1.0 \
+      --use_decoupled_trace_id \
+      --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch \
+      --n_layers_seq=2 \
+      --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 \
+      --seq_add_weight=0.2 \
+      --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 \
+      --history_neg_num=10 \
+      --lr=0.0005 \
+      --tau=0.05 \
+      --cl_weight=0.2 \
+      --mlm_weight=0.3 \
+      --neg_num=24000 \
+      --batch_size=300 \
+      --num_workers=8 \
+      --learner=AdamW \
+      --lr_scheduler_type=constant \
+      --warmup_steps=500 \
+      --weight_decay=0.0001 \
+      --epochs=500 \
+      --early_stop=10 \
+      --eval_step=1 \
+      --metrics="recall@5,ndcg@5,recall@10,ndcg@10" \
+      --valid_metric=ndcg@10 \
+      --device=cuda:6
+
+
+  消融一：w/o wavelet
+
+  python main.py \
+      --seed=2020 \
+      --dataset=Industrial_and_Scientific \
+      --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 \
+      --n_codes_per_lel=256 \
+      --max_his_len=50 \
+      --mask_ratio=0.5 \
+      --embedding_size=128 \
+      --hidden_size=512 \
+      --n_heads=2 \
+      --n_layers=2 \
+      --n_layers_cross=2 \
+      --dropout_prob=0.2 \
+      --dropout_prob_cross=0.1 \
+      --wm_length=10 \
+      --n_prototypes=16 \
+      --wavelet=haar \
+      --n_layers_webd=2 \
+      --n_layers_smc=2 \
+      --disable_webd \
+      --no_webd_rehearsal \
+      --ortho_weight=0.1 \
+      --burst_loss_weight=0.05 \
+      --proto_temperature=1.0 \
+      --use_decoupled_trace_id \
+      --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch \
+      --n_layers_seq=2 \
+      --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 \
+      --seq_add_weight=0.2 \
+      --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 \
+      --history_neg_num=10 \
+      --lr=0.0005 \
+      --tau=0.05 \
+      --cl_weight=0.2 \
+      --mlm_weight=0.3 \
+      --neg_num=24000 \
+      --batch_size=300 \
+      --num_workers=8 \
+      --learner=AdamW \
+      --lr_scheduler_type=constant \
+      --warmup_steps=500 \
+      --weight_decay=0.0001 \
+      --epochs=500 \
+      --early_stop=10 \
+      --eval_step=1 \
+      --metrics="recall@5,ndcg@5,recall@10,ndcg@10" \
+      --valid_metric=ndcg@10
+
+  消融二：w/o memory split
+
+  python main.py \
+      --seed=2020 \
+      --dataset=Industrial_and_Scientific \
+      --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 \
+      --n_codes_per_lel=256 \
+      --max_his_len=50 \
+      --mask_ratio=0.5 \
+      --embedding_size=128 \
+      --hidden_size=512 \
+      --n_heads=2 \
+      --n_layers=2 \
+      --n_layers_cross=2 \
+      --dropout_prob=0.2 \
+      --dropout_prob_cross=0.1 \
+      --wm_length=50 \
+      --n_prototypes=16 \
+      --wavelet=haar \
+      --n_layers_webd=2 \
+      --n_layers_smc=2 \
+      --no_webd_rehearsal \
+      --ortho_weight=0.1 \
+      --burst_loss_weight=0.05 \
+      --proto_temperature=1.0 \
+      --use_decoupled_trace_id \
+      --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch \
+      --n_layers_seq=2 \
+      --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 \
+      --seq_add_weight=0.2 \
+      --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 \
+      --history_neg_num=10 \
+      --lr=0.0005 \
+      --tau=0.05 \
+      --cl_weight=0.2 \
+      --mlm_weight=0.3 \
+      --neg_num=24000 \
+      --batch_size=300 \
+      --num_workers=8 \
+      --learner=AdamW \
+      --lr_scheduler_type=constant \
+      --warmup_steps=500 \
+      --weight_decay=0.0001 \
+      --epochs=500 \
+      --early_stop=10 \
+      --eval_step=1 \
+      --metrics="recall@5,ndcg@5,recall@10,ndcg@10" \
+      --valid_metric=ndcg@10
+
+消融三：fixed threshold（固定阈值）
+
+  python main.py \
+      --seed=2020 --dataset=Industrial_and_Scientific --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 --n_codes_per_lel=256 --max_his_len=50 --mask_ratio=0.5 \
+      --embedding_size=128 --hidden_size=512 --n_heads=2 --n_layers=2 --n_layers_cross=2 \
+      --dropout_prob=0.2 --dropout_prob_cross=0.1 \
+      --wm_length=10 --n_prototypes=16 --wavelet=haar --n_layers_webd=2 --n_layers_smc=2 \
+      --no_webd_rehearsal --fixed_threshold --threshold_value=0.5 \
+      --ortho_weight=0.1 --burst_loss_weight=0.05 --proto_temperature=1.0 \
+      --use_decoupled_trace_id --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch --n_layers_seq=2 --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 --seq_add_weight=0.2 --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 --history_neg_num=10 \
+      --lr=0.0005 --tau=0.05 --cl_weight=0.2 --mlm_weight=0.3 --neg_num=24000 \
+      --batch_size=300 --num_workers=8 --learner=AdamW --lr_scheduler_type=constant \
+      --warmup_steps=500 --weight_decay=0.0001 --epochs=500 --early_stop=10 --eval_step=1 \
+      --device=cuda:7 
+
+  消融四：w/o SMP（去掉原型化）
+
+  python main.py \
+      --seed=2020 --dataset=Industrial_and_Scientific --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 --n_codes_per_lel=256 --max_his_len=50 --mask_ratio=0.5 \
+      --embedding_size=128 --hidden_size=512 --n_heads=2 --n_layers=2 --n_layers_cross=2 \
+      --dropout_prob=0.2 --dropout_prob_cross=0.1 \
+      --wm_length=10 --n_prototypes=16 --wavelet=haar --n_layers_webd=2 --n_layers_smc=2 \
+      --no_webd_rehearsal --no_smc \
+      --ortho_weight=0.1 --burst_loss_weight=0.05 --proto_temperature=1.0 \
+      --use_decoupled_trace_id --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch --n_layers_seq=2 --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 --seq_add_weight=0.2 --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 --history_neg_num=10 \
+      --lr=0.0005 --tau=0.05 --cl_weight=0.2 --mlm_weight=0.3 --neg_num=24000 \
+      --batch_size=300 --num_workers=8 --learner=AdamW --lr_scheduler_type=constant \
+      --warmup_steps=500 --weight_decay=0.0001 --epochs=500 --early_stop=10 --eval_step=1 \
+
+
+  消融五：w/o decoupling（不解耦检索）
+
+  python main.py \
+      --seed=2020 --dataset=Industrial_and_Scientific --device=cuda:0 \
+      --data_path=./dataset/ \
+      --text_types title brand features categories description \
+      --text_index_path=.code.pq.20_256.pca128.title_brand_features_categories_description.json \
+      --code_level=20 --n_codes_per_lel=256 --max_his_len=50 --mask_ratio=0.5 \
+      --embedding_size=128 --hidden_size=512 --n_heads=2 --n_layers=2 --n_layers_cross=2 \
+      --dropout_prob=0.2 --dropout_prob_cross=0.1 \
+      --wm_length=10 --n_prototypes=16 --wavelet=haar --n_layers_webd=2 --n_layers_smc=2 \
+      --no_webd_rehearsal --no_debr_decoupling \
+      --ortho_weight=0.1 --burst_loss_weight=0.05 --proto_temperature=1.0 \
+      --use_decoupled_trace_id --trace_id_gate_bias_init=-2.0 \
+      --use_seq_branch --n_layers_seq=2 --seq_fusion_mode=trace_residual_debr \
+      --seq_gate_bias_init=-2.0 --seq_add_weight=0.2 --trace_memory_gate_bias_init=-2.0 \
+      --history_neg_weight=0.05 --history_neg_num=10 \
+      --lr=0.0005 --tau=0.05 --cl_weight=0.2 --mlm_weight=0.3 --neg_num=24000 \
+      --batch_size=300 --num_workers=8 --learner=AdamW --lr_scheduler_type=constant \
+      --warmup_steps=500 --weight_decay=0.0001 --epochs=500 --early_stop=10 --eval_step=1 \

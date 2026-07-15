@@ -48,10 +48,16 @@ class ContrastiveLoss(nn.Module):
 # ============================================================
 class WaveletBurstDenoiser(nn.Module):
     def __init__(self, hidden_size, inner_size=256, n_heads=2, n_layers=1,
-                 wavelet='haar', dropout=0.1, layer_norm_eps=1e-12):
+                 wavelet='haar', dropout=0.1, layer_norm_eps=1e-12,
+                 disable_webd=False, no_rehearsal=False,
+                 fixed_threshold=False, threshold_value=0.5):
         super().__init__()
         self.hidden_size = hidden_size
         self.wavelet_name = wavelet
+        self.disable_webd = disable_webd
+        self.no_rehearsal = no_rehearsal
+        self.fixed_threshold = fixed_threshold
+        self.threshold_value = threshold_value
 
         # Rehearsal Encoder: causal Transformer
         self.rehearsal_encoder = Transformer(
@@ -131,61 +137,109 @@ class WaveletBurstDenoiser(nn.Module):
             rec = F.pad(rec, (0, target_len - rec.size(2)))
         return rec.permute(0, 2, 1)
 
-    def forward(self, x_wm, mask=None):
+    def full_seq_denoise(self, x_full, valid_mask=None, return_burst_loss=False):
         """
+        Stage 1: Run on the full sequence before splitting.
+        Optional Rehearsal Encoder (bidirectional) -> DWT denoising -> return denoised full sequence.
+
         Args:
-            x_wm: [B, m, d] working memory embeddings (already context-encoded)
-            mask: [B, m] True=valid
+            x_full:           [B, L, d]  full-sequence item embeddings
+            valid_mask:       [B, L]     True=valid position
+            return_burst_loss: bool      if True, also return burst-preservation loss
         Returns:
-            anchor: [B, d], x_before_dwt: [B, m, d], x_denoised: [B, m, d]
+            x_denoised: [B, L, d]
+            burst_loss:  scalar (only if return_burst_loss=True)
         """
-        B, m, d = x_wm.shape
+        if self.disable_webd:
+            return (x_full, x_full.new_tensor(0.0)) if return_burst_loss else x_full
+        B, L, d = x_full.shape
 
-        # Rehearsal Encoding (causal)
-        pos_ids = torch.arange(m, device=x_wm.device).unsqueeze(0).expand(B, -1)
-        pos_emb = self.position_embedding(pos_ids)
-        inp = self.rehearsal_ln(self.rehearsal_dropout(x_wm + pos_emb))
-
-        causal = torch.tril(torch.ones(m, m, device=x_wm.device)).unsqueeze(0).unsqueeze(0)
-        if mask is not None:
-            attn_mask = mask.float().unsqueeze(1).unsqueeze(2) * causal
+        if self.no_rehearsal:
+            x_rehearsed = x_full
         else:
-            attn_mask = causal
-        attn_mask = (1.0 - attn_mask) * -1e9
-
-        x_rehearsed = self.rehearsal_encoder(inp, inp, attn_mask)[-1]
-        x_before_dwt = x_rehearsed.clone()
+            pos_ids = torch.arange(L, device=x_full.device).unsqueeze(0).expand(B, -1)
+            inp = self.rehearsal_ln(self.rehearsal_dropout(x_full + self.position_embedding(pos_ids)))
+            # Bidirectional attention — full-seq denoising is a preprocessing step,
+            # not autoregressive prediction, so no causal mask needed.
+            if valid_mask is not None:
+                attn_mask = valid_mask.float().unsqueeze(1).unsqueeze(2)  # [B,1,1,L]
+                attn_mask = (1.0 - attn_mask) * -1e9
+            else:
+                attn_mask = None
+            x_rehearsed = self.rehearsal_encoder(inp, inp, attn_mask)[-1]
 
         # DWT
         cA, cD = self._dwt_1d(x_rehearsed)
 
-        # Context-aware threshold
-        if mask is not None:
-            mf = mask.float().unsqueeze(-1)
-            context = (x_rehearsed * mf).sum(1) / mf.sum(1).clamp(min=1)
+        # Context-aware threshold (global valid mean)
+        if self.fixed_threshold:
+            # Fixed threshold mode for ablation
+            threshold = torch.full((B, 1, d), self.threshold_value,
+                                   device=x_rehearsed.device, dtype=x_rehearsed.dtype)
         else:
-            context = x_rehearsed.mean(1)
-        threshold = self.threshold_net(context) * self.threshold_scale.abs()
-        threshold = threshold.unsqueeze(1)
+            # Dynamic threshold (original)
+            if valid_mask is not None:
+                mf = valid_mask.float().unsqueeze(-1)
+                context = (x_rehearsed * mf).sum(1) / mf.sum(1).clamp(min=1)
+            else:
+                context = x_rehearsed.mean(1)
+            threshold = self.threshold_net(context) * self.threshold_scale.abs()
+            threshold = threshold.unsqueeze(1)
 
         # Soft thresholding
         cD_clean = torch.sign(cD) * F.relu(torch.abs(cD) - threshold)
 
+        # Burst-preservation loss (optional)
+        # Penalizes over-suppression at high-burstiness positions.
+        # burstiness b_k = ||x_rehearsed[2k+1] - x_rehearsed[2k]|| (approx via adjacent diff)
+        burst_loss = x_full.new_tensor(0.0)
+        if return_burst_loss:
+            # b_k: [B, L'] — norm of adjacent embedding difference at each DWT position
+            L2 = x_rehearsed.shape[1] // 2 * 2
+            diff = x_rehearsed[:, 1:L2:2, :] - x_rehearsed[:, 0:L2:2, :]  # [B, L', d]
+            b_k = diff.norm(dim=-1)                                          # [B, L']
+            b_k = b_k / (b_k.amax(dim=1, keepdim=True) + 1e-8)              # normalize to [0,1]
+            # suppressed amount: |cD| - |cD_clean| = min(|cD|, threshold)
+            suppressed = (cD.abs() - cD_clean.abs()).clamp(min=0)            # [B, L', d]
+            suppressed_norm = suppressed.norm(dim=-1)                        # [B, L']
+            denom = cD.norm(dim=-1).clamp(min=1e-8)                          # [B, L']
+            # weighted mean: high-burst positions penalized more for suppression
+            L_prime = min(b_k.shape[1], suppressed_norm.shape[1])
+            burst_loss = (b_k[:, :L_prime] * suppressed_norm[:, :L_prime] /
+                          denom[:, :L_prime]).mean()
+
         # IDWT
-        x_denoised = self._idwt_1d(cA, cD_clean, m)
+        x_denoised = self._idwt_1d(cA, cD_clean, L)
         x_denoised = self.dropout(x_denoised)
 
-        # Attention pooling → anchor
-        q = self.attn_pool_q(x_denoised)
-        k = self.attn_pool_k(x_denoised)
+        return (x_denoised, burst_loss) if return_burst_loss else x_denoised
+
+    def extract_anchor(self, x_wm, mask=None):
+        """
+        Stage 2: Run on working-memory slice after splitting.
+        Attention pooling only — denoising already done in full_seq_denoise.
+
+        Args:
+            x_wm:  [B, m, d]  denoised working-memory slice
+            mask:  [B, m]     True=valid
+        Returns:
+            anchor: [B, d]
+        """
+        B, m, d = x_wm.shape
+        q = self.attn_pool_q(x_wm)
+        k = self.attn_pool_k(x_wm)
         scores = (q * k).sum(-1) / math.sqrt(d)
         if mask is not None:
             scores = scores.masked_fill(~mask, -1e9)
         weights = F.softmax(scores, dim=-1).unsqueeze(-1)
-        anchor = (x_denoised * weights).sum(1)
-        anchor = self.attn_pool_ln(anchor)
+        anchor = (x_wm * weights).sum(1)
+        return self.attn_pool_ln(anchor)
 
-        return anchor, x_before_dwt, x_denoised
+    def forward(self, x_wm, mask=None):
+        """Legacy path kept for backward compatibility (not used in main forward)."""
+        x_denoised = self.full_seq_denoise(x_wm, valid_mask=mask)
+        anchor = self.extract_anchor(x_denoised, mask=mask)
+        return anchor, x_denoised
 
 
 # ============================================================
@@ -272,14 +326,16 @@ class SemanticMemoryConsolidation(nn.Module):
 # Module 3: DEBR — Decoupled Episodic Buffer Retrieval
 # ============================================================
 class DecoupledEpisodicBuffer(nn.Module):
-    def __init__(self, hidden_size, attn_size=None):
+    def __init__(self, hidden_size, attn_size=None, no_decoupling=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.attn_size = attn_size or hidden_size
+        self.no_decoupling = no_decoupling
 
         self.W_attn_anchor = nn.Linear(hidden_size, self.attn_size)
         self.W_attn_memory = nn.Linear(hidden_size, self.attn_size)
-        self.W_repr_memory = nn.Linear(hidden_size, hidden_size)
+        if not no_decoupling:
+            self.W_repr_memory = nn.Linear(hidden_size, hidden_size)
 
         self.fusion_gate = nn.Sequential(
             nn.Linear(hidden_size * 2, hidden_size),
@@ -292,7 +348,11 @@ class DecoupledEpisodicBuffer(nn.Module):
         k = self.W_attn_memory(memory)
         scores = torch.bmm(k, q.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.attn_size)
         w = F.softmax(scores, dim=-1)
-        v = self.W_repr_memory(memory)
+        if self.no_decoupling:
+            # Ablation: use same subspace for retrieval and representation
+            v = k
+        else:
+            v = self.W_repr_memory(memory)
         return torch.bmm(w.unsqueeze(1), v).squeeze(1)
 
     def forward(self, anchor, memory):
@@ -307,18 +367,6 @@ class DecoupledEpisodicBuffer(nn.Module):
         g = self.fusion_gate(torch.cat([anchor, z_long], dim=-1))
         z_u = g * anchor + (1 - g) * z_long
         return self.layer_norm(z_u)
-
-
-# ============================================================
-# Frequency Consistency Loss
-# ============================================================
-class FrequencyConsistencyLoss(nn.Module):
-    def forward(self, x_before, x_after, mask=None):
-        """MSE between magnitude spectra of x_before and x_after on seq dim."""
-        F_before = torch.fft.rfft(x_before, dim=1)
-        F_after = torch.fft.rfft(x_after, dim=1)
-        diff = (torch.abs(F_after) - torch.abs(F_before)) ** 2
-        return diff.sum(dim=1).mean(dim=-1).mean()
 
 
 class SemanticCalibrationLayer(nn.Module):
@@ -376,7 +424,6 @@ class CEBNet(nn.Module):
         self.n_prototypes = getattr(args, 'n_prototypes', 16)
         self.wavelet = getattr(args, 'wavelet', 'haar')
         self.ortho_weight = getattr(args, 'ortho_weight', 0.1)
-        self.freq_weight = getattr(args, 'freq_weight', 0.01)
         self.attn_size = getattr(args, 'attn_size', None)
         self.proto_temperature = getattr(args, 'proto_temperature', 1.0)
         self.n_layers_webd = getattr(args, 'n_layers_webd', 1)
@@ -433,7 +480,12 @@ class CEBNet(nn.Module):
             n_heads=self.n_heads, n_layers=self.n_layers_webd,
             wavelet=self.wavelet, dropout=self.hidden_dropout_prob,
             layer_norm_eps=self.layer_norm_eps,
+            disable_webd=getattr(args, 'disable_webd', False),
+            no_rehearsal=getattr(args, 'no_webd_rehearsal', False),
+            fixed_threshold=getattr(args, 'fixed_threshold', False),
+            threshold_value=getattr(args, 'threshold_value', 0.5),
         )
+        self.no_smc = getattr(args, 'no_smc', False)
         self.smc = SemanticMemoryConsolidation(
             self.embedding_size, inner_size=self.hidden_size,
             n_heads=self.n_heads, n_replay_layers=self.n_layers_smc,
@@ -441,12 +493,14 @@ class CEBNet(nn.Module):
             dropout=self.hidden_dropout_prob, layer_norm_eps=self.layer_norm_eps,
         )
         self.debr = DecoupledEpisodicBuffer(
-            self.embedding_size, attn_size=self.attn_size
+            self.embedding_size, attn_size=self.attn_size,
+            no_decoupling=getattr(args, 'no_debr_decoupling', False)
         )
 
         self.use_semantic_calibration = getattr(args, 'use_semantic_calibration', False)
         self.calibration_mode = getattr(args, 'calibration_mode', 'fft')
         self.calibration_weight = getattr(args, 'calibration_weight', 0.2)
+        self.burst_loss_weight = getattr(args, 'burst_loss_weight', 0.0)
         self.calibration_gate_bias_init = getattr(args, 'calibration_gate_bias_init', -2.0)
         if self.use_semantic_calibration:
             self.semantic_calibration = SemanticCalibrationLayer(
@@ -482,7 +536,6 @@ class CEBNet(nn.Module):
                 self.trace_memory_gate = nn.Linear(self.embedding_size * 2, self.embedding_size)
             self.seq_fusion_norm = nn.LayerNorm(self.embedding_size, eps=self.layer_norm_eps)
 
-        self.freq_loss_fn = FrequencyConsistencyLoss()
         self.loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
 
         # Pre-cache for negative sampling optimization
@@ -580,7 +633,7 @@ class CEBNet(nn.Module):
         4. SMC: long-term history consolidation → memory
         5. DEBR: decoupled retrieval + fusion → z_u
 
-        Returns: z_u [B,d], code_emb [B*L,C,d], x_before_dwt [B,m,d], x_denoised [B,m,d]
+        Returns: z_u [B,d], code_emb [B*L,C,d] (and z_trace if return_trace=True)
         """
         B, L = item_seq.size()
         d = self.embedding_size
@@ -596,8 +649,18 @@ class CEBNet(nn.Module):
         else:
             split_item_emb = item_emb
 
-        # Step 2: Split (no outer PE — WEBD and SMC handle their own)
-        # For-loop split: right-aligned working memory
+        # Step 1.5: Full-sequence Rehearsal + Wavelet denoising (before split)
+        # valid mask for full sequence
+        full_valid = torch.arange(L, device=self.device).unsqueeze(0) < item_seq_len.unsqueeze(1)
+        use_burst = self.burst_loss_weight > 0 and self.training
+        if use_burst:
+            split_item_emb, burst_loss = self.webd.full_seq_denoise(
+                split_item_emb, valid_mask=full_valid, return_burst_loss=True)
+        else:
+            split_item_emb = self.webd.full_seq_denoise(split_item_emb, valid_mask=full_valid)
+            burst_loss = split_item_emb.new_tensor(0.0)
+
+        # Step 2: Split denoised full sequence into working memory / long-term memory
         x_wm = torch.zeros(B, m, d, device=self.device)
         wm_valid = torch.zeros(B, m, dtype=torch.bool, device=self.device)
 
@@ -628,17 +691,21 @@ class CEBNet(nn.Module):
             x_long = x_wm_raw.clone()
             long_valid = wm_valid.clone()
 
-        # Step 4: WEBD — working memory denoising
-        anchor, x_before_dwt, x_denoised = self.webd(x_wm, mask=wm_valid)
+        # Step 4: WEBD — extract working memory anchor from denoised x_wm
+        anchor = self.webd.extract_anchor(x_wm, mask=wm_valid)
 
         # Step 5: SMC — long-term memory consolidation
-        memory = self.smc(x_long, mask=long_valid)
+        if self.no_smc:
+            # Ablation: skip SMC prototyping, use raw long-term sequence
+            memory = x_long
+        else:
+            memory = self.smc(x_long, mask=long_valid)
 
         # Step 6: DEBR — decoupled retrieval and fusion
         z_trace = None
         if self.use_seq_branch and self.seq_fusion_mode == 'trace_residual_debr':
             z_trace = self._encode_seq_branch(trace_item_emb, item_seq_len)
-            working_memory = x_denoised * wm_valid.unsqueeze(-1).to(x_denoised.dtype)
+            working_memory = x_wm * wm_valid.unsqueeze(-1).to(x_wm.dtype)
             trace_memory = torch.cat([working_memory, memory], dim=1)
             z_u = self._fuse_trace_memory(z_trace, trace_memory)
         else:
@@ -657,8 +724,8 @@ class CEBNet(nn.Module):
                 z_u = z_ceb
 
         if return_trace:
-            return z_u, code_emb, x_before_dwt, x_denoised, z_trace
-        return z_u, code_emb, x_before_dwt, x_denoised
+            return z_u, code_emb, z_trace, burst_loss
+        return z_u, code_emb, burst_loss
 
     @torch.no_grad()
     def get_item_embedding(self):
@@ -759,13 +826,13 @@ class CEBNet(nn.Module):
         # Normal forward
         use_trace_aux = self.trace_aux_rec_weight > 0 and self.use_seq_branch
         if use_trace_aux:
-            z_u, code_output, x_before_dwt, x_denoised, z_trace = self.forward(
+            z_u, code_output, z_trace, burst_loss = self.forward(
                 item_seq, item_seq_len, code_seq, return_trace=True)
         else:
-            z_u, code_output, x_before_dwt, x_denoised = self.forward(item_seq, item_seq_len, code_seq)
+            z_u, code_output, burst_loss = self.forward(item_seq, item_seq_len, code_seq)
             z_trace = None
         # Masked forward (for contrastive learning)
-        z_u_mask, code_output_mask, _, _ = self.forward(item_seq, item_seq_len, code_seq_mask)
+        z_u_mask, code_output_mask, _ = self.forward(item_seq, item_seq_len, code_seq_mask)
 
         z_u = F.normalize(z_u, dim=-1)
         z_u_mask = F.normalize(z_u_mask, dim=-1)
@@ -818,9 +885,6 @@ class CEBNet(nn.Module):
         # 4. Orthogonal loss
         ortho_loss = self.smc.compute_ortho_loss()
 
-        # 5. Frequency consistency loss
-        freq_loss = self.freq_loss_fn(x_before_dwt, x_denoised)
-
         # Total
         loss = (rec_loss
                 + self.trace_aux_rec_weight * trace_aux_rec_loss
@@ -828,14 +892,15 @@ class CEBNet(nn.Module):
                 + self.cl_weight * cl_loss
                 + self.mlm_weight * mlm_loss
                 + self.ortho_weight * ortho_loss
-                + self.freq_weight * freq_loss)
+                + self.burst_loss_weight * burst_loss)
 
         return dict(loss=loss, rec_loss=rec_loss, trace_aux_rec_loss=trace_aux_rec_loss,
                     history_neg_loss=history_neg_loss, cl_loss=cl_loss, mlm_loss=mlm_loss,
-                    ortho_loss=ortho_loss, freq_loss=freq_loss)
+                    burst_loss=burst_loss,
+                    ortho_loss=ortho_loss)
 
     def full_sort_predict(self, item_seq, item_seq_len, code_seq):
-        z_u, _, _, _ = self.forward(item_seq, item_seq_len, code_seq)
+        z_u, _, _burst = self.forward(item_seq, item_seq_len, code_seq)
         z_u = F.normalize(z_u, dim=-1)
         item_emb = F.normalize(self.get_item_embedding(), dim=-1)
         return torch.matmul(z_u, item_emb.T)

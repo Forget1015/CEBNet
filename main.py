@@ -95,11 +95,23 @@ def parse_arguments():
     parser.add_argument('--wavelet', type=str, default='haar',
                         choices=['haar', 'db4', 'sym4', 'coif2'])
     parser.add_argument('--ortho_weight', type=float, default=0.1)
-    parser.add_argument('--freq_weight', type=float, default=0.01)
+    parser.add_argument('--burst_loss_weight', type=float, default=0.0)
     parser.add_argument('--attn_size', type=int, default=None)
     parser.add_argument('--proto_temperature', type=float, default=1.0)
     parser.add_argument('--n_layers_webd', type=int, default=2)
     parser.add_argument('--n_layers_smc', type=int, default=2)
+    parser.add_argument('--disable_webd', action='store_true',
+                        help='Bypass wavelet denoising entirely: full_seq_denoise becomes identity.')
+    parser.add_argument('--no_webd_rehearsal', action='store_true',
+                        help='Skip the BiTransformer rehearsal encoder in WEBD; still apply DWT/IDWT denoising.')
+    parser.add_argument('--fixed_threshold', action='store_true',
+                        help='Use fixed threshold instead of dynamic threshold in WEBD')
+    parser.add_argument('--threshold_value', type=float, default=0.5,
+                        help='Fixed threshold value when fixed_threshold=True')
+    parser.add_argument('--no_smc', action='store_true',
+                        help='Disable SMC prototyping, use raw long-term sequence as memory')
+    parser.add_argument('--no_debr_decoupling', action='store_true',
+                        help='Disable decoupled retrieval in DEBR, use same subspace for K and V')
 
     # Output
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -131,6 +143,8 @@ if __name__ == "__main__":
         + ("_histmask" if args.mask_history_in_eval else "")
         + (f"_histneg{args.history_neg_weight}" if args.history_neg_weight > 0 else "")
         + (f"_calib{args.calibration_mode}_w{args.calibration_weight}" if args.use_semantic_calibration else "")
+        + ("_nowebd" if args.disable_webd else "")
+        + ("_norehearsal" if args.no_webd_rehearsal else "")
     )
 
     init_seed(args.seed, True)
