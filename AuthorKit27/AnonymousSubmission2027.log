@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.7.9)  15 JUL 2026 06:56
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.7.9)  18 JUL 2026 03:54
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -439,72 +439,62 @@ LaTeX Font Info:    Font shape `T1/ntxtlf/m/n' will be
 (Font)              scaled to size 10.95pt on input line 223.
 LaTeX Font Info:    Font shape `T1/ntxtlf/b/n' will be
 (Font)              scaled to size 10.95pt on input line 223.
-<fracwork.pdf, id=11, 774.64406pt x 392.96812pt>
-File: fracwork.pdf Graphic file (type pdf)
-<use fracwork.pdf>
-Package pdftex.def Info: fracwork.pdf  used on input line 230.
-(pdftex.def)             Requested size: 505.89pt x 256.63747pt.
+<fracwork.png, id=11, 1699.34875pt x 932.48375pt>
+File: fracwork.png Graphic file (type png)
+<use fracwork.png>
+Package pdftex.def Info: fracwork.png  used on input line 230.
+(pdftex.def)             Requested size: 505.89pt x 277.58455pt.
 LaTeX Font Info:    Font shape `T1/ntxtlf/m/n' will be
-(Font)              scaled to size 7.0pt on input line 252.
+(Font)              scaled to size 7.0pt on input line 249.
 LaTeX Font Info:    Font shape `T1/ntxtlf/m/n' will be
-(Font)              scaled to size 5.0pt on input line 252.
+(Font)              scaled to size 5.0pt on input line 249.
  [2{/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/enc/dvips/tex-gyre/q-ts1.enc}]
-Underfull \hbox (badness 10000) in paragraph at lines 259--260
- \T1/ntxtlf/b/n/10 Adap-tive Burst-preserving De-nois-ing \T1/ntxtlf/m/n/10 Con-ven-tional
- []
-
-
-Underfull \hbox (badness 1237) in paragraph at lines 259--260
-\T1/ntxtlf/m/n/10 context-dependent thresh-olds from the en-tire be-hav-ior
- []
-
-
-Underfull \hbox (badness 3128) in paragraph at lines 285--286
+Underfull \hbox (badness 3128) in paragraph at lines 273--274
  \T1/ntxtlf/b/n/10 Be-hav-ior Re-con-struc-tion \T1/ntxtlf/m/n/10 Fi-nally, the re-fined high-
  []
 
 
-Underfull \hbox (badness 1033) in paragraph at lines 285--286
+Underfull \hbox (badness 1033) in paragraph at lines 273--274
 \T1/ntxtlf/m/n/10 trends and re-con-structed through the In-verse Dis-crete
  []
 
-[3 <./fracwork.pdf>]
-Underfull \hbox (badness 1253) in paragraph at lines 409--410
+[3 <./fracwork.png (PNG copy)>]
+Underfull \hbox (badness 1521) in paragraph at lines 316--318
+\T1/ntxtlf/m/n/10 where $\OML/cmm/m/it/10 ^^O$ \T1/ntxtlf/m/n/10 is a small con-stant for nu-mer-i-cal sta-bil-ity.
+ []
+
+
+Underfull \hbox (badness 1253) in paragraph at lines 367--370
  \T1/ntxtlf/b/n/10 De-cou-pled Re-trieval and Rep-re-sen-ta-tion \T1/ntxtlf/m/n/10 Given the
  []
 
 [4]
-Overfull \hbox (1.18433pt too wide) detected at line 496
-\OMS/cmsy/m/n/10 L[] \OT1/cmr/m/n/10 = \OMS/cmsy/m/n/10 ^^@ [] []\OML/cmm/m/it/10 ;
+Overfull \hbox (1.18433pt too wide) detected at line 456
+[]\OMS/cmsy/m/n/10 L[] \OT1/cmr/m/n/10 = \OMS/cmsy/m/n/10 ^^@ [] []\OML/cmm/m/it/10 ;
  []
 
 
-Overfull \hbox (6.97083pt too wide) in paragraph at lines 574--613
+Overfull \hbox (6.97083pt too wide) in paragraph at lines 518--557
  [][] 
  []
 
 
-Overfull \hbox (9.60019pt too wide) in alignment at lines 621--663
-[] [] [] [] [] [] [] [] [] [] [] [] []
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 685--686
+Underfull \hbox (badness 10000) in paragraph at lines 630--631
  \T1/ntxtlf/b/n/10 Eval-u-a-tion Met-rics \T1/ntxtlf/m/n/10 Fol-low-ing pre-vi-ous stud-ies
  []
 
 
-Underfull \hbox (badness 4467) in paragraph at lines 685--686
+Underfull \hbox (badness 4467) in paragraph at lines 630--631
 \T1/ntxtlf/m/n/10 [11,18,36,42], we adopt the full-ranking eval-u-a-tion
  []
 
 
-Underfull \hbox (badness 2229) in paragraph at lines 685--686
+Underfull \hbox (badness 2229) in paragraph at lines 630--631
 \T1/ntxtlf/m/n/10 pro-to-col and re-port Re-call@K and NDCG@K with
  []
 
 [5]
-Underfull \hbox (badness 2460) in paragraph at lines 697--698
+Underfull \hbox (badness 2460) in paragraph at lines 642--643
 []\T1/ntxtlf/m/n/10 Further anal-y-sis on dif-fer-ent datasets re-veals that
  []
 
@@ -512,20 +502,20 @@ Underfull \hbox (badness 2460) in paragraph at lines 697--698
 Underfull \vbox (badness 6016) has occurred while \output is active []
 
  [6]
-<Hyper_parameter analysis.png, id=171, 935.495pt x 427.5975pt>
+<Hyper_parameter analysis.png, id=43, 935.495pt x 427.5975pt>
 File: Hyper_parameter analysis.png Graphic file (type png)
 <use Hyper_parameter analysis.png>
-Package pdftex.def Info: Hyper_parameter analysis.png  used on input line 714.
+Package pdftex.def Info: Hyper_parameter analysis.png  used on input line 658.
 (pdftex.def)             Requested size: 239.39438pt x 109.4176pt.
-<case1_final.png, id=172, 454.5783pt x 248.127pt>
+<case1_final.png, id=44, 454.5783pt x 248.127pt>
 File: case1_final.png Graphic file (type png)
 <use case1_final.png>
-Package pdftex.def Info: case1_final.png  used on input line 722.
+Package pdftex.def Info: case1_final.png  used on input line 666.
 (pdftex.def)             Requested size: 239.39438pt x 130.67372pt.
-<case3_final.png, id=173, 847.2453pt x 426.6339pt>
+<case3_final.png, id=45, 847.2453pt x 426.6339pt>
 File: case3_final.png Graphic file (type png)
 <use case3_final.png>
-Package pdftex.def Info: case3_final.png  used on input line 739.
+Package pdftex.def Info: case3_final.png  used on input line 683.
 (pdftex.def)             Requested size: 239.39438pt x 120.54382pt.
  (./AnonymousSubmission2027.bbl
 
@@ -545,17 +535,17 @@ LaTeX Warning: There were multiply-defined labels.
  ) 
 Here is how much of TeX's memory you used:
  9188 strings out of 467168
- 147855 string characters out of 5399418
- 602058 words of memory out of 5000000
+ 147863 string characters out of 5399418
+ 601058 words of memory out of 5000000
  38284 multiletter control sequences out of 15000+600000
  672696 words of font info for 89 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  89i,10n,117p,1376b,433s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/tex-gyre/qtmr.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmb.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmr.pfb>
-Output written on AnonymousSubmission2027.pdf (8 pages, 2462167 bytes).
+</data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmex7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/tex-gyre/qtmr.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmb.pfb></data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmr.pfb>
+Output written on AnonymousSubmission2027.pdf (8 pages, 3883221 bytes).
 PDF statistics:
- 249 PDF objects out of 1000 (max. 8388607)
- 153 compressed objects within 2 object streams
+ 132 PDF objects out of 1000 (max. 8388607)
+ 77 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  26 words of extra memory for PDF output out of 10000 (max. 10000000)
 

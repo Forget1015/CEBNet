@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex AnonymousSubmission2027"] 1784098618.97477 "AnonymousSubmission2027.aux" "AnonymousSubmission2027.bbl" "AnonymousSubmission2027" 1784098620.82405 0
+["bibtex AnonymousSubmission2027"] 1784346870.98447 "AnonymousSubmission2027.aux" "AnonymousSubmission2027.bbl" "AnonymousSubmission2027" 1784346873.39107 0
   "./aaai2027.bib" 1778055174 4814 3d5459e99850edf229f5aeab78271f79 ""
   "./aaai2027.bst" 1777903788 30207 bd248dfe461b9b2fc7481a44feafe197 ""
-  "AnonymousSubmission2027.aux" 1784098620.56638 519 79fac45e3e860af1afeb29190c3dfc1c "pdflatex"
+  "AnonymousSubmission2027.aux" 1784346873.0747 519 79fac45e3e860af1afeb29190c3dfc1c "pdflatex"
   (generated)
   "AnonymousSubmission2027.bbl"
   "AnonymousSubmission2027.blg"
   (rewritten before read)
-["pdflatex"] 1784098619.04866 "/data0/yejinxuan/workspace/CEBNet/AuthorKit27/AnonymousSubmission2027.tex" "AnonymousSubmission2027.pdf" "AnonymousSubmission2027" 1784098620.82432 0
+["pdflatex"] 1784346871.08492 "/data0/yejinxuan/workspace/CEBNet/AuthorKit27/AnonymousSubmission2027.tex" "AnonymousSubmission2027.pdf" "AnonymousSubmission2027" 1784346873.39141 0
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/enc/dvips/newtx/ntx-ec-tlf.enc" 1698694482 2914 fdbc4a54b9bc76f4551b5303f2737d33 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/enc/dvips/tex-gyre/q-ts1.enc" 1529098226 3124 3813fd4c981d99822890a2861b0d274c ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -47,6 +47,7 @@
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb" 1248133631 34811 78b52f49e893bcba91bd7581cdc144c0 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb" 1248133631 30251 6afa5cb1d0204815a708a080681d4674 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb" 1248133631 36299 5f9df58c2139e7edcf37c8fca4bd384d ""
+  "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb" 1248133631 37912 77d683123f92148345f3fc36a38d9ab1 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb" 1248133631 36281 c355509802a035cadc5f15869451dcee ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb" 1248133631 36912 b448ef9ad9d7228ec3c6e71005136d55 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb" 1248133631 35752 024fb6c41858982481f6968b5fc26508 ""
@@ -55,6 +56,8 @@
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1248133631 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb" 1248133631 32915 7bf7720c61a5b3a7ff25b0964421c9b6 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb" 1248133631 32716 08e384dc442464e7285e891af9f45947 ""
+  "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmex7.pfb" 1248133631 30457 bc0868ebece724ed7c3d37e3d9bff7bd ""
+  "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib7.pfb" 1248133631 39386 0bb525d495ceab21fe797301a586e0d7 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb" 1248133631 34694 ad62b13721ee8eda1dcc8993c8bd7041 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmb.pfb" 1698694482 255251 958c6ad4e5518904a53cf1118c612893 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-dist/fonts/type1/public/newtx/ztmr.pfb" 1698694482 286816 82db2bfe6920054b1a43661c07078412 ""
@@ -128,16 +131,16 @@
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1783589077 5573076 163e56be47918dea38588c9f4a9a4395 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf-var/web2c/pdftex/pdflatex.fmt" 1783589250 3656711 660d0ab8ed27816c847c79afa5e9d338 ""
   "/data0/yejinxuan/software/TinyTeX/.TinyTeX/texmf.cnf" 1783571262 637 edd806fb06a89761a6034e1968af9017 ""
-  "/data0/yejinxuan/workspace/CEBNet/AuthorKit27/AnonymousSubmission2027.tex" 1784098616.30235 45559 456a99f341b68c14f73dac5598e97918 ""
-  "AnonymousSubmission2027.aux" 1784098620.56638 519 79fac45e3e860af1afeb29190c3dfc1c "pdflatex"
-  "AnonymousSubmission2027.bbl" 1784098619.04237 84 ad44dd934fce130d8c35d95d8c9664ef "bibtex AnonymousSubmission2027"
-  "AnonymousSubmission2027.tex" 1784098616.30235 45559 456a99f341b68c14f73dac5598e97918 ""
+  "/data0/yejinxuan/workspace/CEBNet/AuthorKit27/AnonymousSubmission2027.tex" 1784346867.96682 46571 52e8cb9bc814c58e46d907ac0ef0a0ff ""
+  "AnonymousSubmission2027.aux" 1784346873.0747 519 79fac45e3e860af1afeb29190c3dfc1c "pdflatex"
+  "AnonymousSubmission2027.bbl" 1784346871.07475 84 ad44dd934fce130d8c35d95d8c9664ef "bibtex AnonymousSubmission2027"
+  "AnonymousSubmission2027.tex" 1784346867.96682 46571 52e8cb9bc814c58e46d907ac0ef0a0ff ""
   "Hyper_parameter analysis.png" 1784098072.86224 86595 42de9ef3f5a79094c46216a21b347b6a ""
   "aaai2027.sty" 1779114063 16915 1b1c792e2acfbbd8b672259e267b95d8 ""
   "case1_final.png" 1784044617.03771 1035969 22a449ff6faff0a1d057936e95a20971 ""
   "case3_final.png" 1784098449.88912 1425613 3b79be3966536f1bb4eaaab6b875fb28 ""
   "fig2_grad_conflict.png" 1784083830.18113 78336 7390ae187742d89b5084233b12814378 ""
-  "fracwork.pdf" 1784018151.60883 112005 8bf3a218e1db5389a7efb89c8efc119c ""
+  "fracwork.png" 1784185089.79051 1521381 6e49c445d283547099da88b1da9e074c ""
   (generated)
   "AnonymousSubmission2027.aux"
   "AnonymousSubmission2027.log"

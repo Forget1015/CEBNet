@@ -90,7 +90,8 @@ def parse_arguments():
     parser.add_argument('--calibration_gate_bias_init', type=float, default=-2.0)
 
     # CEB-Net specific
-    parser.add_argument('--wm_length', type=int, default=5)
+    parser.add_argument('--wm_length', type=float, default=5,
+                        help='Working memory length. If <=1.0, treated as percentage of max_his_len; otherwise absolute length.')
     parser.add_argument('--n_prototypes', type=int, default=16)
     parser.add_argument('--wavelet', type=str, default='haar',
                         choices=['haar', 'db4', 'sym4', 'coif2'])

@@ -420,7 +420,12 @@ class CEBNet(nn.Module):
         self.initializer_range = 0.02
 
         # CEB-Net specific
-        self.wm_length = getattr(args, 'wm_length', 5)
+        wm_length_raw = getattr(args, 'wm_length', 5)
+        # If wm_length <= 1.0, treat as percentage; otherwise as absolute length
+        if wm_length_raw <= 1.0:
+            self.wm_length = int(self.max_seq_length * wm_length_raw)
+        else:
+            self.wm_length = int(wm_length_raw)
         self.n_prototypes = getattr(args, 'n_prototypes', 16)
         self.wavelet = getattr(args, 'wavelet', 'haar')
         self.ortho_weight = getattr(args, 'ortho_weight', 0.1)

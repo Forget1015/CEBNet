@@ -222,12 +222,12 @@ The main contributions of this paper are summarized as follows:
 \section{Method}
 \subsection{Problem Formulation}
 
-Let $\mathcal{U}=\{u_1,\cdots,u_{|\mathcal U|}\}$ and $\mathcal{V}=\{v_1,\cdots,v_{|\mathcal V|}\}$ denote the user set and the item set, respectively. Each item $v\in\mathcal V$ is associated with a unique item ID as well as a set of textual attributes, such as the product title, brand, and category. To leverage semantic information, we employ a semantic encoder to obtain the semantic representation of each item, denoted by $\mathbf{z}_i\in\mathbb{R}^{d}$, where $d$ is the embedding dimension.
+Let $\mathcal{U}=\{u_1,\cdots,u_{|\mathcal U|}\}$ and $\mathcal{V}=\{v_1,\cdots,v_{|\mathcal V|}\}$ denote the user set and the item set, respectively. Each item $v\in\mathcal V$ is associated with a unique item ID as well as a set of textual attributes, such as the product title, brand, and category. To leverage semantic information, we employ a semantic encoder to obtain the semantic representation of each item, denoted by $\bm{z}_i\in\mathbb{R}^{d}$, where $d$ is the embedding dimension.
 
-For each user, the historical interaction sequence is represented as $\mathcal{S}=\{v_1,\cdots,v_L\}$, and the corresponding sequence of semantic representations is denoted by $\mathbf{Z}=[\mathbf{z}_1,\cdots,\mathbf{z}_L]$. Given the historical interaction sequence $\mathcal{S}$, the objective of sequential recommendation is to predict the next item that the user is most likely to interact with, i.e., maximizing the conditional probability:$P(v_{L+1}\mid\mathcal S).$
+For each user, the historical interaction sequence is represented as $\mathcal{S}=\{v_1,\cdots,v_L\}$, and the corresponding sequence of semantic representations is denoted by $\bm{Z}=[\bm{z}_1,\cdots,\bm{z}_L]$. Given the historical interaction sequence $\mathcal{S}$, the objective of sequential recommendation is to predict the next item that the user is most likely to interact with, i.e., maximizing the conditional probability:$P(v_{L+1}\mid\mathcal S).$
 \begin{figure*}[t]  % <--- 注意这里变成了 figure*，[t] 表示优先放页顶
   \centering        % 建议加上居中，否则图片可能偏左
-  \includegraphics[width=\textwidth]{fracwork} % 这里 width=\textwidth 代表整个页面的宽度
+  \includegraphics[width=\textwidth]{fracwork.png} % 这里 width=\textwidth 代表整个页面的宽度
 \caption{The overall architecture of DHPRec. (Bottom) The Frequency-Domain Feature Refinement module constructs refined item representations via spectral denoising. 
 (Middle) The Pattern-Based Anchor-Guided Fusion Network, which transforms the sequence into compact Pattern Units and utilizes the Anchor to extract relevant long-term regularities.  
 (Top) A motivating example illustrating how the Immediate Intent (e.g., Christmas demand) bridges specific Historical Habits. }
@@ -244,53 +244,38 @@ Specifically, WEBD decomposes the behavior sequence into low-frequency trends an
 
 \subsubsection{Behavior Decomposition}
 
-Given the user behavior representation sequence: $\mathbf{Z}=[\mathbf{z}_1,\mathbf{z}_2,\cdots,\mathbf{z}_L],$
-
-WEBD performs multi-scale decomposition using the Discrete Wavelet Transform (DWT):
-
-$$
-\mathbf{A}, \mathbf{D} = \text{DWT}(\mathbf{Z}).
-$$
-
-Here, $\mathbf{A}$ and $\mathbf{D}$ denote the low-frequency trend and high-frequency detail components, respectively. The low-frequency component captures stable interest evolution, while the high-frequency component reflects local behavioral changes. Since high-frequency variations may represent either noise or genuine bursty interests, adaptive discrimination is required.
+Given the user behavior representation sequence  $\bm{Z}=[\bm{z}_1,\bm{z}_2,\cdots,\bm{z}_L]$,WEBD performs multi-scale decomposition using the Discrete Wavelet Transform (DWT):
+\begin{equation}
+\bm{A}, \bm{D} = \text{DWT}(\bm{Z}),
+\end{equation}
+where $\bm{A}$ and $\bm{D} \in \mathbb{C}^{(L' + 1) \times d}$, $L'=\lfloor L /2 \rfloor$. Here, $\bm{A}$ and $\bm{D}$ denote the low-frequency trend and high-frequency detail components, respectively. The low-frequency component captures stable interest evolution, while the high-frequency component reflects local behavioral changes. Since high-frequency variations may represent either noise or genuine bursty interests, adaptive discrimination is required.
 
 \subsubsection{Adaptive Burst-preserving Denoising}
 
-Conventional wavelet denoising relies on fixed thresholds, which cannot adapt to diverse behavioral patterns. Therefore, we learn context-dependent thresholds from the entire behavior sequence. Specifically, a global contextual representation is obtained by average pooling:
-
-$$
-\mathbf{c} = \frac{1}{L}\sum_{j=1}^{L}\mathbf{z}_j.
-$$
+We learn context-dependent thresholds from the entire behavior sequence. Specifically, a global contextual representation is obtained by average pooling:
+\begin{equation}
+\bm{c} = \frac{1}{L}\sum_{j=1}^{L}\bm{z}_j.
+\end{equation}
 
 The contextual representation is then fed into a lightweight MLP to predict channel-wise adaptive thresholds:
+\begin{equation}
+\boldsymbol{\tau} = \alpha \cdot \sigma\left(\text{MLP}\!\left(\bm{c}\right)\right),
+\end{equation}
+where $\alpha$ is a learnable scaling factor and $\sigma(\cdot)$ denotes the sigmoid function. Given the learned thresholds, soft-thresholding is applied to the high-frequency coefficients:
+\begin{equation}
+\bm{D}' = \text{sign}(\bm{D}) \cdot \max(|\bm{D}|-\boldsymbol{\tau},0).
+\end{equation}
 
-
-
-$$
-\boldsymbol{\tau} = \alpha \cdot \sigma\left(\text{MLP}\!\left(\mathbf{c}\right)\right),
-$$
-
-where $\alpha$ is a learnable scaling factor and $\sigma(\cdot)$ denotes the sigmoid function.
-
-Given the learned thresholds, soft-thresholding is applied to the high-frequency coefficients:
-
-$$
-\mathbf{D}' = \text{sign}(\mathbf{D}) \cdot \max(|\mathbf{D}|-\boldsymbol{\tau},0).
-$$
-
-The adaptive threshold mechanism adjusts the denoising strength according to behavioral contexts. Specifically, smaller thresholds preserve consistent high-frequency patterns corresponding to bursty interests, while larger thresholds suppress irregular fluctuations caused by noise.
+The adaptive threshold mechanism adjusts the denoising strength according to behavioral contexts. Smaller thresholds preserve consistent high-frequency patterns corresponding to bursty interests, while larger thresholds suppress irregular fluctuations caused by noise.
 
 \subsubsection{Behavior Reconstruction}
 
 Finally, the refined high-frequency components are combined with the low-frequency trends and reconstructed through the Inverse Discrete Wavelet Transform (IDWT):
+\begin{equation}
+\bm{H} = \text{IDWT}(\bm{A},\bm{D}').
+\end{equation}
 
-$$
-\mathbf{H} = \text{IDWT}(\mathbf{A},\mathbf{D}').
-$$
-
-The reconstructed sequence is represented as: $\mathbf{H}=[\mathbf{h}_1,\mathbf{h}_2,\cdots,\mathbf{h}_L],$
-
-where $\mathbf{H}$ denotes the refined behavior representations. By selectively removing random fluctuations while preserving stable trends and bursty interests, WEBD provides cleaner inputs for subsequent semantic memory modeling.
+The reconstructed sequence is represented as $\bm{H}=[\bm{h}_1,\bm{h}_2,\cdots,\bm{h}_L]$. By selectively removing random fluctuations while preserving stable trends and bursty interests, WEBD provides cleaner inputs for subsequent semantic memory modeling.
 
 \subsection{Adaptive Semantic Memory Modeling}
 
@@ -298,67 +283,49 @@ Although WEBD refines behavior representations, the resulting sequence still mix
 
 \subsubsection{Memory Construction}
 
-Given the refined behavior sequence from WEBD,$\mathbf{H}=[\mathbf{h}_1,\mathbf{h}_2,\cdots,\mathbf{h}_L],$ we divide it into working memory and long-term memory:$\mathbf{H}_{wm}=[\mathbf{h}_{L-m+1},\cdots,\mathbf{h}_L],
-\mathbf{H}_{long}=[\mathbf{h}_{1},\cdots,\mathbf{h}_{L-m}].$
+Given the refined behavior sequence from WEBD, $\bm{H}=[\bm{h}_1,\bm{h}_2,\cdots,\bm{h}_L],$ To capture user interests at different temporal scales, we divide the sequence into working memory and long-term memory according to a ratio $\rho$: $\bm{H}_{short}=
+[\bm{h}_{L-\lfloor\rho L\rfloor+1},\cdots,\bm{h}_{L}],\ 
+\bm{H}_{long}=
+[\bm{h}_{1},\cdots,\bm{h}_{L-\lfloor\rho L\rfloor}]$. 
 
-The working memory captures recent user intentions, while the long-term memory models stable preference patterns. We aggregate working memory through attention pooling:
-
-$$
-a_j=\text{softmax}(\mathbf{w}_a^\top[\mathbf{H}_{wm}]_j),
-$$
-
-$$
-\mathbf{k}_{wm}=\sum_j a_j[\mathbf{H}_{wm}]_j,
-$$
-
-where $\mathbf{k}_{wm}$ serves as the short-term interest representation for subsequent memory retrieval.
+The working memory captures recent user intentions, while the long-term memory models stable preference patterns. For each representation $[\bm{H}_{short}]_j$, where $j \in \{1,\ldots,|\bm{H}_{short}|\}$, we obtain the short-term interest: \begin{equation}
+a_j=\text{softmax}(\bm{w}_a^\top[\bm{H}_{wm}]_j),
+\end{equation}
+\begin{equation}
+\bm{s}=\sum_{j=1}^{|\bm{H}_{short}|}a_j[\bm{H}_{short}]_j.
+\end{equation}
+where $\mathbf{w}_a$ is a learnable attention vector. The resulting $\bm{s}_{wm}$ serves as the short-term interest representation for subsequent memory retrieval.
 
 \subsubsection{Semantic Prototype Learning}
 
-Directly retaining all historical behaviors introduces redundancy and makes it difficult to form reusable long-term memories. Therefore, we compress long-term behaviors into a set of semantic prototypes. First, positional embeddings and a Transformer encoder are applied to capture temporal dependencies:
-$$
-\widetilde{\mathbf{H}}_{long}=\text{Transformer}(\text{LN}(\mathbf{H}_{long}+\mathbf{P}_{long})).
-$$
-
-We maintain $K$ learnable semantic prototypes:
-
-$$
-\mathbf{P}=[\mathbf{p}_1,\ldots,\mathbf{p}_K]\in\mathbb{R}^{K\times d}.
-$$
-
-For each contextualized behavior representation $\widetilde{\mathbf{h}}_j$, its assignment probability over prototypes is computed as:
-
-$$
+Directly retaining all historical behaviors introduces redundancy and makes it difficult to form reusable long-term memories. Therefore, we compress long-term behaviors into a set of semantic prototypes. We maintain $K$ learnable semantic prototypes $\bm{P}=[\bm{p}_1,\ldots,\bm{p}_K]\in\mathbb{R}^{K\times d}$. For the long-term memory $\bm{H}_{long}$, positional embeddings and a Transformer encoder are applied to capture temporal dependencies:
+\begin{equation}
+\widetilde{\bm{H}}_{long}=\text{Transformer}(\text{LN}(\bm{H}_{long}+\bm{P}_{long})).
+\end{equation}
+where $\bm{P}_{long}$ denotes the learnable positional embeddings. For each contextualized behavior representation $\widetilde{\bm{h}}_j$, its assignment probability over prototypes is computed as:
+\begin{equation}
 \alpha_{j,k}=
-\frac{\exp(\widetilde{\mathbf{h}}_j^\top\mathbf{p}_k/\tau_p)}
-{\sum_{l=1}^{K}\exp(\widetilde{\mathbf{h}}_j^\top\mathbf{p}_l/\tau_p)}.
-$$
-
-The $k$-th semantic memory slot is obtained by weighted aggregation:
-
-$$
-\mathbf{m}_k=
-\frac{\sum_j\alpha_{j,k}\widetilde{\mathbf{h}}_j}
+\frac{\exp(\widetilde{\bm{h}}_j^\top\bm{p}_k/\tau_p)}
+{\sum_{l=1}^{K}\exp(\widetilde{\bm{h}}_j^\top\bm{p}_l/\tau_p)}.
+\end{equation}
+where $\tau_p$ is a temperature coefficient controlling the sharpness of prototype assignments. Then the $k$-th semantic memory slot is obtained by weighted aggregation:
+\begin{equation}
+\bm{m}_k=
+\frac{\sum_j\alpha_{j,k}\widetilde{\bm{h}}_j}
 {\sum_j\alpha_{j,k}+\epsilon}.
-$$
+\end{equation}
+where $\epsilon$ is a small constant for numerical stability. The resulting long-term semantic memory is $\bm{M}_{long}=[\bm{m}_1,\ldots,\bm{m}_K]\in\mathbb{R}^{K\times d}$. By converting numerous historical interactions into a small number of semantic prototypes, the model obtains compact long-term memories that can be dynamically retrieved under different recommendation contexts.
 
-The resulting long-term semantic memory is:
-
-$$
-\mathbf{M}_{sem}=[\mathbf{m}_1,\ldots,\mathbf{m}_K]\in\mathbb{R}^{K\times d}.
-$$
-
-By converting numerous historical interactions into a small number of semantic prototypes, the model obtains compact long-term memories that can be dynamically retrieved under different recommendation contexts.
-
+Finally,together with the aggregated working memory representation, the complete user memory is formulated as:
+\begin{equation}
+\bm{M}=[\mathbf{M}_{long};\mathbf{s}] 
+\end{equation}
 \subsubsection{Prototype Diversity Regularization}
 
 To prevent semantic prototypes from collapsing into similar representations, we introduce a diversity regularization term:
-
-$$
-\mathcal{L}_{ortho}=
-\frac{1}{K}\sum_k\max_{j\neq k}\cos(\mathbf{p}_k,\mathbf{p}_j),
-$$
-
+\begin{equation}
+ \mathcal{L}{ortho} = \frac{1}{K}\sum_{k=1}^{K} \max_{ j\neq k} \cos(\mathbf{p}_k, \mathbf{p}_j),
+\end{equation}
 where $\cos(\cdot,\cdot)$ denotes cosine similarity. This constraint encourages different memory slots to capture complementary interest patterns.
 
 \subsection{Decoupled Memory Retrieval}
@@ -370,107 +337,100 @@ However, existing sequential recommendation methods typically employ a unified r
 
 \subsubsection{Context-aware Query Encoding}
 
-To capture the current recommendation context, we construct a query from the complete behavioral trajectory rather than only recent interactions. However, semantic item representations may lack sufficient discrimination when different items share similar meanings. Therefore, we introduce an independent Trace ID embedding table in the retrieval branch:$\mathbf{E}^{trace\_id} \in \mathbb{R}^{|\mathcal{I}| \times d}.$ For item $i$, its Trace ID representation is obtained as: $\mathbf{e}_i=\mathbf{E}^{trace\_id}[i].$
+To capture the current recommendation context, we construct a query from the complete behavioral trajectory rather than only recent interactions. However, semantic item representations may lack sufficient discrimination when different items share similar meanings. Therefore, we introduce an independent Trace ID embedding table in the retrieval branch: $\bm{E} \in \mathbb{R}^{|\mathcal V| \times d}.$ For item $i$, its Trace ID representation is obtained as: $\bm{e}_i=\bm{E}[i].$
 
 We inject the Trace ID information into the denoised behavior representation through a gated residual mechanism:
-
-$$
-g_i = \sigma\!\left(\mathbf{W}_g[\mathbf{h}_i;\mathbf{e}_i]+b_g\right),
-$$
-
-$$
-\hat{\mathbf{h}}_i^{trace}
+\begin{equation}
+g_i = \sigma\!\left(\bm{W}_g[\bm{h}_i;\bm{e}_i]+b_g\right),
+\end{equation}
+\begin{equation}
+\hat{\bm{h}}_i
 =
-\text{LN}(\mathbf{h}_i+g_i\odot\mathbf{e}_i),
-$$
-
-where $\mathbf{h}_i$ denotes the behavior representation produced by WEBD. The trajectory-enhanced sequence is formulated as:$\hat{\bm{H}}
+\text{LN}(\bm{h}_i+g_i\odot\bm{e}_i),
+\end{equation}
+where $\bm{h}_i$ denotes the behavior representation produced by WEBD. The trajectory-enhanced sequence is formulated as: $\hat{\bm{H}}
 =
-[\hat{\bm{h}}_1,\hat{\bm{h}}_2,\cdots,\hat{\bm{h}}_L].$
-
-After adding positional embeddings, a causal Transformer is applied:
-
-$$
-\mathbf{H}_{trace}
+[\hat{\bm{h}}_1,\hat{\bm{h}}_2,\cdots,\hat{\bm{h}}_L]$. After adding positional embeddings, a causal Transformer is applied:
+\begin{equation}
+\bm{H}_{trace}
 =
 \text{CausalTransformer}
-(\hat{\mathbf{H}}+\mathbf{P}_{trace}).
-$$
-
-The hidden state at the last position is used as the context-aware query: $\mathbf{q}_{trace}
-=
-\mathbf{H}_{trace}[L].$
+(\hat{\bm{H}}+\bm{P}_{trace}).
+\end{equation}
+where $\bm{P}_{trace}$ denotes the learnable positional embeddings. The hidden state at the last position is projected to obtain the context-aware query: $\bm{q}_{trace}=\bm{W}_{q}\bm{H}_{trace}[L]$.
 
 This query integrates both long-term behavioral patterns and recent intentions, providing a comprehensive context representation for memory retrieval.
 
 
 \subsubsection{Decoupled Retrieval and Representation}
 
-Given the context-aware query, DMR retrieves relevant semantic memories from $\mathbf{M}_{sem}$. To avoid the conflict between retrieval-oriented matching and prediction-oriented representation learning, we introduce two independent spaces: the Retrieval Space and the Representation Space.
+Given the context-aware query $\bm{q}_{trace}$, DMR retrieves relevant memories from the unified memory bank $\bm{M}$. 
+We argue that memory matching and semantic representation learning optimize different objectives. 
+Therefore, DMR explicitly separates these two processes into a Retrieval Space $\mathcal{A}$ and a Representation Space $\mathcal{R}$.
 
-The query and semantic memories are first projected into the retrieval space:
-
-$$
-\mathbf{q}^{\mathcal{A}}
+The retrieval space is responsible for measuring the relevance between the current context and historical memories.
+The memory bank are first projected into the retrieval space:
+\begin{equation}
+\bm{M}^{\mathcal{A}}
 =
-\mathbf{W}_{q}\mathbf{q}_{trace},
-\mathbf{K}^{\mathcal{A}}
-=
-\mathbf{W}_{k}\mathbf{M}_{sem}.
-$$
-
-The retrieval weights are computed using scaled dot-product attention:
-
-$$
+\bm{W}_{m}^{\mathcal{A}}
+\bm{M},
+\end{equation}
+where $\bm{W}_{m}^{\mathcal{A}}$ are learnable projection matrices. 
+The retrieval weights are then computed according to the similarity between the context query and memory slots:
+\begin{equation}
 \boldsymbol{\beta}
 =
 \text{softmax}
 \left(
 \frac{
-\mathbf{K}^{\mathcal{A}}
-(\mathbf{q}^{\mathcal{A}})^\top
+\bm{M}^{\mathcal{A}}
+(\bm{q}^{\mathcal{A}})^{\top}
 }
 {\sqrt{d_a}}
-\right).
-$$
+\right),
+\end{equation}
 
-The retrieval space only determines memory relevance. The retrieved semantic information is then mapped into an independent representation space:
-
-$$
-\mathbf{V}^{\mathcal{R}}
+The retrieval space only determines which memories should be selected and does not directly participate in user representation learning. 
+To preserve semantic information for recommendation prediction, the memory bank is independently projected into the representation space:
+\begin{equation}
+\bm{M}^{\mathcal{R}}
 =
-\mathbf{W}_{v}\mathbf{M}_{sem},
-$$
-
-and aggregated according to the retrieval weights:
-
-$$
-\mathbf{r}_{mem}
+\bm{W}_{m}^{\mathcal{R}}
+\bm{M},
+\end{equation}
+where $\bm{W}_{m}^{\mathcal{R}}$ denotes the representation projection matrix. The retrieved memory representation is obtained by aggregating memory slots according to the retrieval weights:
+\begin{equation}
+\bm{r}_{mem}
 =
-\boldsymbol{\beta}\mathbf{V}^{\mathcal{R}}.
-$$
+\boldsymbol{\beta}
+\bm{M}^{\mathcal{R}}.
+\end{equation}
 
-Finally, we fuse the current behavioral context with the retrieved semantic memory through gated residual learning:
-
-$$
-\mathbf{g}_{mem}
+Finally, we combine the retrieved long-term interests with the current behavioral context through gated residual~learning:
+\begin{equation}
+\bm{g}_{mem}
 =
 \sigma
-(\mathbf{W}_g[\mathbf{q}_{trace};\mathbf{r}_{mem}]),
-$$
-
-$$
-\mathbf{z}_u
+(
+\bm{W}_{g}
+[\bm{q}_{trace};\bm{r}_{mem}]
++b_g
+),
+\end{equation}
+\begin{equation}
+\bm{z}_{u}
 =
 \text{LN}
 (
-\mathbf{q}_{trace}
+\bm{q}_{trace}
 +
-\mathbf{g}_{mem}\odot\mathbf{r}_{mem}
+\bm{g}_{mem}\odot\bm{r}_{mem}
 ).
-$$
+\end{equation}
 
-By decoupling retrieval and representation learning, DMR allows memory matching and semantic prediction to be optimized independently, producing a more expressive user representation while enabling adaptive coordination between short-term intentions and long-term preferences.
+By decoupling retrieval and representation spaces, DMR allows memory matching and semantic prediction to be optimized independently. 
+This design avoids the interference caused by conflicting objectives in unified representations and produces a more expressive user representation with adaptive coordination between short-term intentions and long-term preferences.
 \subsection{Training Objective}
 
 DREAMRec is trained in an end-to-end manner by jointly optimizing the recommendation objective and auxiliary regularization objectives. Specifically, we consider next-item prediction loss, contrastive learning loss, semantic prototype diversity regularization, and frequency consistency regularization.
@@ -478,9 +438,9 @@ DREAMRec is trained in an end-to-end manner by jointly optimizing the recommenda
 
 \subsubsection{Recommendation Loss}
 
-Given the learned user representation $\mathbf{z}_u$, we adopt sampled softmax cross-entropy for next-item prediction. Given the positive item $v^{+}$ and sampled negative items $\mathcal{N}$, the recommendation loss is defined as:
+Given the learned user representation $\bm{z}_u$, we adopt sampled softmax cross-entropy for next-item prediction. Given the positive item $v^{+}$ and sampled negative items $\mathcal{N}$, the recommendation loss is defined as:
 
-$$
+\begin{equation}
 \mathcal{L}_{rec}
 =
 -\log
@@ -493,64 +453,51 @@ $$
 \sum_{i^-\in\mathcal{N}}
 \exp(s(u,i^-)/\tau)
 },
-$$
-
-where
-
-$$
-s(u,v)=\mathbf{z}_u^T\mathbf{z}_v
-$$
-
-denotes the matching score between user and item representations, and $\tau$ is the temperature coefficient.
+\end{equation}
+where $s(u,v)=\bm{z}_u^T\bm{z}_v$ denotes the matching score between user and item representations, and $\tau$ is the temperature coefficient.
 
 
 \subsubsection{Contrastive Learning Objective}
 
-To improve the robustness of user representations against behavioral perturbations, we introduce a contrastive learning objective. For each user sequence, a perturbed view is generated by randomly masking historical interactions, and the corresponding user representation $\widetilde{\mathbf{z}}_u$ is obtained using the same encoder.
+To improve the robustness of user representations against behavioral perturbations, we introduce a contrastive learning objective. For each user sequence, a perturbed view is generated by randomly masking historical interactions, and the corresponding user representation $\widetilde{\bm{z}}_u$ is obtained using the same encoder.
 
 We adopt a symmetric InfoNCE objective, treating different views of the same user as positive pairs and other users within the mini-batch as negative samples:
-
-$$
+\begin{equation}
 \mathcal{L}_{CL}
 =
 -\frac{1}{2}
 (\mathcal{L}_{u\rightarrow \tilde{u}}
 +
 \mathcal{L}_{\tilde{u}\rightarrow u}),
-$$
-
-where
-
-$$
+\end{equation}
+where $
 \mathcal{L}_{u\rightarrow \tilde{u}}
 =
 -\log
 \frac{
 \exp(
 \langle
-\hat{\mathbf z}_u,
-\hat{\tilde{\mathbf z}}_u
+\hat{\bm z}_u,
+\hat{\tilde{\bm z}}_u
 \rangle/\tau)
 }
 {
 \sum_{j\in\mathcal{B}}
 \exp(
 \langle
-\hat{\mathbf z}_u,
-\hat{\tilde{\mathbf z}}_j
+\hat{\bm z}_u,
+\hat{\tilde{\bm z}}_j
 \rangle/\tau)
 },
-$$
-
+$
 and $\mathcal{L}_{\tilde{u}\rightarrow u}$ is defined symmetrically. Here,
-$\hat{\mathbf z}=\mathbf z/\|\mathbf z\|_2$ denotes the normalized representation and $\mathcal{B}$ represents the mini-batch user set.
+$\hat{\bm z}=\bm z/\|\bm z\|_2$ denotes the normalized representation and $\mathcal{B}$ represents the mini-batch user set.
 
 
 \subsubsection{Overall Objective}
 
 The final optimization objective is formulated as:
-
-$$
+\begin{equation}
 \mathcal{L}
 =
 \mathcal{L}_{rec}
@@ -558,11 +505,8 @@ $$
 \lambda_{CL}\mathcal{L}_{CL}
 +
 \lambda_{proto}\mathcal{L}_{proto}
-+
-\lambda_{freq}\mathcal{L}_{freq},
-$$
-
-where $\lambda_{CL}$, $\lambda_{proto}$, and $\lambda_{freq}$ balance the contributions of the auxiliary objectives.
+\end{equation}
+where $\lambda_{CL}$ and $\lambda_{proto}$ balance the contributions of the auxiliary objectives.
 
 \begin{table*}[t]
   \centering
@@ -621,42 +565,43 @@ where $\lambda_{CL}$, $\lambda_{proto}$, and $\lambda_{freq}$ balance the contri
   \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}} l cccc cccc cccc}
     \toprule
     \multirow{2}{*}{Variants} &
-    \multicolumn{4}{c}{Baby} &
     \multicolumn{4}{c}{Game} &
+    \multicolumn{4}{c}{Scientific} &
     \multicolumn{4}{c}{ML-1M} \\
     \cmidrule(lr){2-5} \cmidrule(lr){6-9} \cmidrule(lr){10-13}
     & R@5 & R@10 & N@5 & N@10 & R@5 & R@10 & N@5 & N@10 & R@5 & R@10 & N@5 & N@10 \\
     \midrule
     % --- Row 0: DHPRec (Full) ---
-    (0) DHPRec &
-    \textbf{0.0315} & \textbf{0.0504} & \textbf{0.0204} & \textbf{0.0265} &
-    \textbf{0.0703} & \textbf{0.1114} & \textbf{0.0442} & \textbf{0.0578} &
-    \textbf{0.0452} & \textbf{0.0712} & \textbf{0.0290} & \textbf{0.0370} \\
+    (0) DREAMRec &
+    \textbf{7.01} & \textbf{11.37} & \textbf{4.22} & \textbf{5.58} &
+    \textbf{3.96} & \textbf{6.04} & 
+    \textbf{2.44} & \textbf{3.12} &
+    \textbf{16.65} & \textbf{26.11} & \textbf{10.42} & \textbf{13.44} \\
     % --- Row 1: w/o FDFE ---
-    (1) w/o FDFE &
-    0.0302 & 0.0484 & 0.0193 & 0.0252 &
-    0.0675 & 0.1068 & 0.0427 & 0.0554 &
-    \underline{0.0441} & \underline{0.0705} & \underline{0.0285} & 0.0367 \\
+    (1) w/o wavelet &
+    6.95 & 11.22 & 4.13 & 5.49 &
+    3.89 & 5.98 & 2.31 & 3.04 &
+    15.69 & 25.94 & 10.04 & 13.01 \\
     % --- Row 2: w/o Pattern ---
-    (2) w/o Pattern &
-    0.0308 & 0.0490 & 0.0196 & 0.0255 &
-    \underline{0.0682} & \underline{0.1091} & \underline{0.0432} & \underline{0.0562} &
-    0.0437 & 0.0701 & 0.0284 & \underline{0.0369} \\
+    (2) fixed threshold &
+    6.88 & 10.99 & 4.06 & 5.41 &
+    3.72 & 5.83 & 2.04 & 2.71 &
+    15.77 & 25.59 & 9.85 & 12.89 \\
     % --- Row 3: Fusion-Concat ---
-    (3) Fusion-Concat &
-    \underline{0.0309} & \underline{0.0491} & \underline{0.0199} & \underline{0.0257} &
-    0.0677 & 0.1073 & 0.0429 & 0.0559 &
-    0.0436 & \underline{0.0705} & 0.0281 & 0.0367 \\
+    (3) w/o memory &
+    6.91 & 11.18 & 4.11 & 5.48 &
+    3.80 & 5.96 & 2.30 & 2.99 &
+    15.84 & 25.34 & 9.54 & 12.87 \\
     % --- Row 2: w/o Pattern ---
-    (4) w/o query &
-    0.0308 & 0.0490 & 0.0196 & 0.0255 &
-    \underline{0.0682} & \underline{0.1091} & \underline{0.0432} & \underline{0.0562} &
-    0.0437 & 0.0701 & 0.0284 & \underline{0.0369} \\
+    (4) w/o SMP &
+    6.88 & 11.05 & 4.01 & 5.38 &
+    3.55 & 5.32 & 2.06 & 2.51 &
+    15.66 & 25.48 & 9.86 & 12.92 \\
     % --- Row 3: Fusion-Concat ---
     (5) w/o decoupling &
-    \underline{0.0309} & \underline{0.0491} & \underline{0.0199} & \underline{0.0257} &
-    0.0677 & 0.1073 & 0.0429 & 0.0559 &
-    0.0436 & \underline{0.0705} & 0.0281 & 0.0367 \\
+    6.86 & 11.07 & 3.89 & 5.32 &
+    3.86 & 5.73 & 2.27 & 2.98 &
+    15.57 & 25.33 & 9.49 & 12.62 \\
 
     
     \bottomrule
@@ -695,7 +640,6 @@ As shown in Table 1, DREAMRec consistently achieves the best performance across 
 The performance gains mainly stem from the progressive modeling strategy of DREAMRec. Specifically, WEBD suppresses random behavioral noise while preserving informative bursty interests, Semantic Memory Modeling organizes redundant historical interactions into compact semantic memories, and DMR decouples memory retrieval from representation learning to alleviate the optimization conflict caused by unified user representations. These components work collaboratively to produce more robust and expressive user representations.
 
 Further analysis on different datasets reveals that DREAMRec consistently outperforms existing methods on all three Amazon datasets, demonstrating its ability to alleviate the representation limitations caused by sparse user-item interactions. More importantly, DREAMRec achieves substantially larger improvements on the long-sequence ML-1M dataset, suggesting that the proposed semantic memory and context-aware retrieval mechanisms are particularly effective in modeling long-term interest evolution and retrieving relevant historical preferences under complex recommendation scenarios.
-
 \subsection{Ablation Study}
 As shown in Table 2, DREAMRec consistently achieves the best performance across all datasets and evaluation metrics, demonstrating the effectiveness of the proposed user modeling framework. Compared with the strongest competing baseline, CCFRec, DREAMRec consistently improves both Recall and NDCG, indicating its ability to learn more accurate and discriminative user representations while generalizing well across datasets with different characteristics.
 
